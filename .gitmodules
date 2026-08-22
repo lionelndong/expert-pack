@@ -1,0 +1,3 @@
+[submodule "runtime/ep-mcp"]
+	path = runtime/ep-mcp
+	url = https://github.com/lionelndong/ep-mcp.git

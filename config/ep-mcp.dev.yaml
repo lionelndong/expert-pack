@@ -1,0 +1,31 @@
+# Local-only MCP configuration. Run the server from the repository root.
+# Set GEMINI_API_KEY in your shell before using `serve`; do not commit it here.
+server:
+  host: "127.0.0.1"
+  port: 8000
+  log_level: "info"
+  mcp_allowed_hosts:
+    - "localhost"
+    - "localhost:*"
+    - "127.0.0.1"
+    - "127.0.0.1:*"
+
+packs:
+  - slug: "alex-hormozi-public"
+    path: "packs/alex-hormozi-public"
+    # Keep generated indexes and embedding caches out of the source pack.
+    index_dir: "runtime/ep-mcp-index/alex-hormozi-public"
+    # This configuration is safe only while bound to 127.0.0.1.
+    # Use a secret injected through EP_MCP_KEY_ALEX_HORMOZI_PUBLIC before
+    # exposing the service beyond this machine.
+    api_keys: []
+
+embedding:
+  provider: "gemini"
+  model: "gemini-embedding-001"
+
+retrieval:
+  default_max_results: 8
+  mmr_enabled: true
+  mmr_lambda: 0.95
+  requires_expansion_enabled: true

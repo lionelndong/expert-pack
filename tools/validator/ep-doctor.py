@@ -25,7 +25,7 @@ Fix operations:
 Always runs ep-validate before and after, showing the diff.
 """
 
-import os, re, sys, yaml, copy, shutil, hashlib
+import os, re, sys, yaml, copy, shutil, hashlib, subprocess
 from datetime import date
 from collections import defaultdict
 
@@ -511,8 +511,8 @@ def _run_validator(pack_path):
     validator = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'ep-validate.py')
     if not os.path.exists(validator):
         print("  (ep-validate.py not found next to ep-doctor.py — skipping)")
-        return
-    os.system(f'"{sys.executable}" "{validator}" "{pack_path}" --provenance')
+        return 0
+    return subprocess.call([sys.executable, validator, pack_path, '--provenance'])
 
 
 def main():

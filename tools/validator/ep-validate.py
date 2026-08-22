@@ -284,6 +284,12 @@ class Validator:
             rel_dir = os.path.dirname(rel).replace(os.sep, '/')
             if not rel_dir:
                 continue
+            # The core schema defines this as the canonical pack-wide coverage
+            # map for every pack type, including person packs.  It is
+            # navigation metadata rather than a person-specific atom, so it
+            # intentionally keeps its cross-schema filename.
+            if rel_dir == 'meta' and bn == 'source-coverage.md':
+                continue
             prefix = prefixes.get(rel_dir)
             if prefix is None:
                 # try parent dir (e.g. summaries/stories -> summaries)

@@ -1,6 +1,11 @@
 skills/expertpack/scripts/__pycache__/
 __pycache__/
+.venv/
 exports/
+runtime/ep-mcp-index/
+private-input/
+config/ep-mcp.local.yaml
+.env
 
 # Ingest-gate / deploy-prep build artifacts
 build/

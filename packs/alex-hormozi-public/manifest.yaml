@@ -1,0 +1,71 @@
+# ExpertPack Manifest — Fill in all fields before hydrating
+
+# ── Identity ──────────────────────────────────────────────────────────────────
+name: "Alex Hormozi — Public Source Pack"
+slug: "alex-hormozi-public"           # kebab-case, no spaces
+
+# Change type to match your subject:
+#   product  — a software product, platform, or tool
+#   person   — a human being (stories, beliefs, voice, relationships)
+#   process  — a complex multi-phase endeavor
+#   composite — combines multiple packs (advanced)
+type: "person"
+
+version: "1.0.0"
+schema_version: "4.1"
+description: "A provenance-first internal knowledge pack for Alex Hormozi's publicly documented business frameworks and decision patterns. It remains empty until reviewed source material is ingested."
+entry_point: "overview.md"
+
+# ── Author ────────────────────────────────────────────────────────────────────
+author: "Alex Hormozi Brain project"
+created: "2026-08-22"
+updated: "2026-08-22"
+
+# ── Freshness tracking ────────────────────────────────────────────────────────
+# Update after each review pass. coverage_pct = verified_file_count / total_file_count * 100
+freshness:
+  refresh_cycle: "P90D"          # How often content should be reviewed (ISO 8601)
+  last_full_review: "2026-08-22"
+  verified_file_count: 0
+  total_file_count: 0
+  coverage_pct: 0
+
+# ── EK Ratio (fill in after running blind-probe eval) ─────────────────────────
+# ek_ratio:
+#   value: 0.00
+#   measured: "2026-08-22"
+#   models: ["gpt-5", "claude-sonnet-4-6", "gemini-2.5-flash"]
+#   propositions_tested: 0
+
+# ── Authority boundary ────────────────────────────────────────────────────────
+# What this pack may assert. Consumers must refuse outside it.
+authority_boundary:
+  in_scope: "Publicly documented Alex Hormozi business frameworks, decision patterns, opinions, and communication style represented by verified source-backed atoms in this pack."
+  out_of_scope:
+    - "Advice represented as Alex Hormozi's personal, current, or authorized opinion"
+    - "Private, paywalled, confidential, or unverified material"
+    - "Legal, tax, investment, medical, or other regulated advice"
+    - "Claims without a supporting source-backed atom"
+  refuse_when:
+    - "No supporting atom in the pack"
+    - "Question is outside in_scope"
+  no_source_no_claim: true
+
+# ── Context strategy ──────────────────────────────────────────────────────────
+# Keep person-specific evidence searchable; provenance and volatile content are
+# available on demand so they do not crowd decision-agent context.
+context:
+  always:
+    - overview.md
+    - STATUS.md
+  searchable:
+    - mind/
+    - opinions/
+    - conversations/
+    - speeches/
+    - workflows/
+    - troubleshooting/
+    - faq/
+  on_demand:
+    - meta/
+    - volatile/
