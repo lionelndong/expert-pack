@@ -1,0 +1,69 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://expertpack.local/schemas/source-intake/rights-decisions.schema.json",
+  "title": "Source Rights Decisions",
+  "description": "Human rights decisions for a source-intake manifest. This document does not override a quarantined or excluded inventory record.",
+  "type": "object",
+  "required": [
+    "decision_file_version",
+    "reviewed_at",
+    "reviewed_by",
+    "decisions"
+  ],
+  "properties": {
+    "$schema": { "const": "rights-decisions.schema.json" },
+    "decision_file_version": { "const": "1.0" },
+    "reviewed_at": { "type": "string", "format": "date-time" },
+    "reviewed_by": { "type": "string", "minLength": 1 },
+    "decisions": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/decision" }
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "decisionBase": {
+      "type": "object",
+      "required": ["source_id", "decision"],
+      "properties": {
+        "source_id": { "type": "string", "minLength": 1 },
+        "decision": {
+          "anyOf": [
+            { "const": "approved_internal" },
+            { "const": "excluded" },
+            { "type": "string", "pattern": "^quarantined_[a-z0-9_]+$" }
+          ]
+        },
+        "approved_by": { "type": "string", "minLength": 1 },
+        "approved_at": { "type": "string", "format": "date" },
+        "use_scope": { "const": "internal_agent_retrieval" },
+        "evidence": { "type": "string", "minLength": 1 },
+        "reason": { "type": "string", "minLength": 1 },
+        "notes": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "decision": {
+      "allOf": [
+        { "$ref": "#/$defs/decisionBase" },
+        {
+          "if": { "properties": { "decision": { "const": "approved_internal" } } },
+          "then": { "required": ["approved_by", "approved_at", "use_scope", "evidence"] }
+        },
+        {
+          "if": {
+            "properties": {
+              "decision": {
+                "anyOf": [
+                  { "const": "excluded" },
+                  { "type": "string", "pattern": "^quarantined_[a-z0-9_]+$" }
+                ]
+              }
+            }
+          },
+          "then": { "required": ["reason"] }
+        }
+      ]
+    }
+  }
+}

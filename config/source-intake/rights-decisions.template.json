@@ -1,0 +1,27 @@
+{
+  "$schema": "rights-decisions.schema.json",
+  "decision_file_version": "1.0",
+  "reviewed_at": "2026-08-22T00:00:00Z",
+  "reviewed_by": "designated-rights-holder",
+  "decisions": [
+    {
+      "source_id": "src-example",
+      "decision": "approved_internal",
+      "approved_by": "designated-rights-holder",
+      "approved_at": "2026-08-22",
+      "use_scope": "internal_agent_retrieval",
+      "evidence": "Document the licence, ownership, or other authorization supporting this internal use.",
+      "notes": "Approval is recorded for this source and does not authorize imitation, public redistribution, or use outside the stated scope."
+    },
+    {
+      "source_id": "src-not-for-use",
+      "decision": "excluded",
+      "reason": "Do not make this source available to agents."
+    },
+    {
+      "source_id": "qsrc-suspect-example",
+      "decision": "quarantined_rights_review",
+      "reason": "Keep quarantined while ownership or authorization is unresolved."
+    }
+  ]
+}

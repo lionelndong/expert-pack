@@ -493,20 +493,24 @@ class Validator:
             bn = os.path.basename(rel)
             for ref in (fm.get('related') or []):
                 ref_bn = os.path.basename(str(ref))
-                if ref_bn not in self.all_basenames:
+                target_paths = self.basenames.get(ref_bn, [])
+                if not target_paths:
                     continue  # already flagged in check_broken_related
-                # Find the target file and check if it links back
-                for target_rel, target_fm in self.fm.items():
-                    if os.path.basename(target_rel) != ref_bn:
-                        continue
-                    target_related_bns = [
-                        os.path.basename(str(r))
-                        for r in (target_fm.get('related') or [])
-                    ]
-                    if bn not in target_related_bns:
-                        self._add('WARN', 'unidirectional-related', rel,
-                                   f"Links to '{ref_bn}' but '{ref_bn}' doesn't link back")
-                    break
+                # `basenames` is built while scanning the pack.  The old
+                # implementation linearly searched every file for each
+                # related link, which made a chain of thousands of chunks
+                # quadratic to validate. Duplicate basenames are separately
+                # reported by check_duplicate_basenames, so retaining the
+                # first scanned target preserves the old lookup semantics.
+                target_rel = target_paths[0]
+                target_fm = self.fm[target_rel]
+                target_related_bns = [
+                    os.path.basename(str(r))
+                    for r in (target_fm.get('related') or [])
+                ]
+                if bn not in target_related_bns:
+                    self._add('WARN', 'unidirectional-related', rel,
+                               f"Links to '{ref_bn}' but '{ref_bn}' doesn't link back")
 
     # ── Check 15: orphaned files ─────────────────────────────────────────
     def check_orphaned(self):

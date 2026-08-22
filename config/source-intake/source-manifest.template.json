@@ -1,0 +1,41 @@
+{
+  "$schema": "source-manifest.schema.json",
+  "manifest_version": "1.0",
+  "generated_at": "2026-08-22T00:00:00Z",
+  "inventory_mode": "metadata_and_sha256_only",
+  "approved_roots": [
+    {
+      "root_id": "root-example",
+      "path": "C:\\approved-source-root",
+      "files_scanned": 1,
+      "inventory_only_sources": 1,
+      "quarantined_sources": 0,
+      "unreadable_sources": 0
+    }
+  ],
+  "sources": [
+    {
+      "source_id": "src-example",
+      "path": "C:\\approved-source-root\\example.pdf",
+      "relative_path": "example.pdf",
+      "type": "pdf",
+      "rights_status": "pending_rights_review",
+      "use_scope": "inventory_only",
+      "hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+      "topic": "unclassified",
+      "notes": "Inventory-only record. A separate rights and quality review is required before any extraction or agent access.",
+      "size_bytes": 0,
+      "modified_at": "2026-08-22T00:00:00Z"
+    }
+  ],
+  "quarantined_sources": [],
+  "unreadable_sources": [],
+  "scan_warnings": [],
+  "summary": {
+    "files_scanned": 1,
+    "inventory_only_sources": 1,
+    "quarantined_sources": 0,
+    "unreadable_sources": 0,
+    "skipped_symlinks": 0
+  }
+}

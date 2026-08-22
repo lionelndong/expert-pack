@@ -1,0 +1,166 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://expertpack.local/schemas/source-intake/source-manifest.schema.json",
+  "title": "Source Intake Manifest",
+  "description": "Metadata-only provenance manifest. It is an inventory record, not authorization to use a source in an agent.",
+  "type": "object",
+  "required": [
+    "manifest_version",
+    "generated_at",
+    "inventory_mode",
+    "approved_roots",
+    "sources",
+    "quarantined_sources",
+    "unreadable_sources",
+    "summary"
+  ],
+  "properties": {
+    "$schema": { "const": "source-manifest.schema.json" },
+    "manifest_version": { "const": "1.0" },
+    "generated_at": { "type": "string", "format": "date-time" },
+    "inventory_mode": { "const": "metadata_and_sha256_only" },
+    "approved_roots": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/approvedRoot" }
+    },
+    "sources": {
+      "description": "Candidate sources only. These remain inventory-only pending a separate rights review.",
+      "type": "array",
+      "items": { "$ref": "#/$defs/source" }
+    },
+    "quarantined_sources": {
+      "description": "Metadata-only audit entries for paths that matched a suspect term. No content hash or extraction is performed.",
+      "type": "array",
+      "items": { "$ref": "#/$defs/quarantinedSource" }
+    },
+    "unreadable_sources": {
+      "description": "Metadata-only audit entries for source files whose SHA-256 could not be read.",
+      "type": "array",
+      "items": { "$ref": "#/$defs/unreadableSource" }
+    },
+    "scan_warnings": {
+      "type": "array",
+      "items": { "type": "object" }
+    },
+    "summary": { "$ref": "#/$defs/summary" }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "sourceBase": {
+      "type": "object",
+      "required": [
+        "source_id",
+        "path",
+        "relative_path",
+        "type",
+        "rights_status",
+        "use_scope",
+        "hash",
+        "topic",
+        "notes",
+        "size_bytes",
+        "modified_at"
+      ],
+      "properties": {
+        "source_id": { "type": "string", "minLength": 1 },
+        "path": { "type": "string", "minLength": 1 },
+        "relative_path": { "type": "string", "minLength": 1 },
+        "type": { "type": "string", "minLength": 1 },
+        "rights_status": {
+          "type": "string",
+          "enum": [
+            "pending_rights_review",
+            "quarantined_suspect_path",
+            "pending_inventory_read_error"
+          ]
+        },
+        "use_scope": {
+          "type": "string",
+          "enum": [
+            "inventory_only",
+            "quarantined_no_agent_access",
+            "not_eligible_read_error"
+          ]
+        },
+        "hash": {
+          "anyOf": [
+            { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+            { "type": "null" }
+          ]
+        },
+        "topic": { "type": "string", "minLength": 1 },
+        "notes": { "type": "string", "minLength": 1 },
+        "size_bytes": { "type": "integer", "minimum": 0 },
+        "modified_at": { "type": "string", "format": "date-time" },
+        "quarantine_reason": { "type": "string", "minLength": 1 },
+        "read_error": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": false
+    },
+    "source": {
+      "allOf": [
+        { "$ref": "#/$defs/sourceBase" },
+        {
+          "properties": {
+            "rights_status": { "const": "pending_rights_review" },
+            "use_scope": { "const": "inventory_only" },
+            "hash": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" }
+          }
+        }
+      ]
+    },
+    "quarantinedSource": {
+      "allOf": [
+        { "$ref": "#/$defs/sourceBase" },
+        {
+          "required": ["quarantine_reason"],
+          "properties": {
+            "rights_status": { "const": "quarantined_suspect_path" },
+            "use_scope": { "const": "quarantined_no_agent_access" },
+            "hash": { "type": "null" },
+            "quarantine_reason": { "type": "string", "minLength": 1 }
+          }
+        }
+      ]
+    },
+    "unreadableSource": {
+      "allOf": [
+        { "$ref": "#/$defs/sourceBase" },
+        {
+          "required": ["read_error"],
+          "properties": {
+            "rights_status": { "const": "pending_inventory_read_error" },
+            "use_scope": { "const": "not_eligible_read_error" },
+            "hash": { "type": "null" },
+            "read_error": { "type": "string", "minLength": 1 }
+          }
+        }
+      ]
+    },
+    "approvedRoot": {
+      "type": "object",
+      "required": ["root_id", "path", "files_scanned", "inventory_only_sources", "quarantined_sources", "unreadable_sources"],
+      "properties": {
+        "root_id": { "type": "string", "minLength": 1 },
+        "path": { "type": "string", "minLength": 1 },
+        "files_scanned": { "type": "integer", "minimum": 0 },
+        "inventory_only_sources": { "type": "integer", "minimum": 0 },
+        "quarantined_sources": { "type": "integer", "minimum": 0 },
+        "unreadable_sources": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": false
+    },
+    "summary": {
+      "type": "object",
+      "required": ["files_scanned", "inventory_only_sources", "quarantined_sources", "unreadable_sources", "skipped_symlinks"],
+      "properties": {
+        "files_scanned": { "type": "integer", "minimum": 0 },
+        "inventory_only_sources": { "type": "integer", "minimum": 0 },
+        "quarantined_sources": { "type": "integer", "minimum": 0 },
+        "unreadable_sources": { "type": "integer", "minimum": 0 },
+        "skipped_symlinks": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": false
+    }
+  }
+}

@@ -1,0 +1,2 @@
+# Runtime dependency used only when extracting text-layer PDFs.
+pypdf>=5.0.0
