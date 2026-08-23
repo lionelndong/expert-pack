@@ -7,8 +7,11 @@ committed to this repository.
 
 ## Components
 
-- `packs/alex-hormozi-public/` — public-source pack; it fails closed until
-  verified atoms are added.
+- `private-input/packs/alex-hormozi-brain-v1/` — generated local composite
+  brain containing normalized public transcripts, approved evidence, EPUB
+  chapters, and skill entrypoints. It is ignored by Git.
+- `packs/alex-hormozi-public/` — public-source scaffold; it fails closed until
+  verified public atoms are added.
 - `runtime/ep-mcp/` — pinned fork of the MCP retrieval runtime.
 - `config/ep-mcp.dev.yaml` — tracked development configuration for the public
   scaffold.
@@ -20,6 +23,13 @@ committed to this repository.
   generation; flagged material is quarantined rather than extracted.
 - `tools/private-pack-builder/` — opt-in local builder for approved material,
   with page/line provenance and OCR/unsupported-file reporting.
+- `tools/hormozi-brain/build_brain.py` — builds the composite private pack,
+  normalizes all 273 supplied videos into timestamp-bounded atoms, extracts
+  the EPUB, records audio metadata, and mirrors the 24 executable skills.
+- `tools/hormozi-brain/fetch_official.py` — opt-in metadata/subtitle-only
+  refresh for explicitly verified official channels.
+- `tools/hormozi-brain/ocr_sources.py` and `transcribe_audio.py` — fail-closed
+  adapters for remaining OCR/audio gaps.
 - `guides/agent-decision-support-contract.md` — required evidence-first rules
   for agents that consume the packs.
 
@@ -33,16 +43,16 @@ $env:PYTHONIOENCODING = "utf-8"
 
 ## Start the local MCP server
 
-The local configuration loads the approved evidence and skills packs. Starting
-the service needs an embedding provider. Gemini sends material to Google's
-embedding API; use it only after approving that data flow. Azure OpenAI is
-also supported when it is your approved provider. Keep provider credentials in
-the shell or a secret manager, never in Git.
+The local configuration loads the one composite Hormozi brain. Starting the
+service needs an embedding provider. The configured default is direct OpenAI
+`text-embedding-3-small`; it sends source text to the existing OpenAI API and
+keeps vectors in local SQLite. Keep provider credentials in the shell or a
+secret manager, never in Git.
 
-For an approved Gemini setup:
+For an approved OpenAI setup:
 
 ```powershell
-$env:GEMINI_API_KEY = "..."
+$env:OPENAI_API_KEY = "..."
 .\scripts\start-ep-mcp.ps1 -AllowRemoteEmbedding
 ```
 

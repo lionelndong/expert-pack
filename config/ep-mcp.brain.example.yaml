@@ -1,0 +1,28 @@
+# Example local configuration for the generated private Hormozi brain.
+# Copy to config/ep-mcp.local.yaml and set OPENAI_API_KEY in the environment.
+server:
+  host: "127.0.0.1"
+  port: 8000
+  log_level: "info"
+  mcp_allowed_hosts:
+    - "localhost"
+    - "localhost:*"
+    - "127.0.0.1"
+    - "127.0.0.1:*"
+  mcp_allowed_origins: []
+
+packs:
+  - slug: "alex-hormozi-brain"
+    path: "private-input/packs/alex-hormozi-brain-v1"
+    index_dir: "runtime/ep-mcp-index/alex-hormozi-brain"
+    api_keys: []
+
+embedding:
+  provider: "openai"
+  model: "text-embedding-3-small"
+
+retrieval:
+  default_max_results: 10
+  mmr_enabled: true
+  mmr_lambda: 0.7
+  requires_expansion_enabled: true

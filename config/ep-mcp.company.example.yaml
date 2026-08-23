@@ -1,0 +1,27 @@
+# Internal-network example. Inject EP_MCP_KEY_ALEX_HORMOZI_BRAIN through the
+# company secret manager and place this service behind the existing gateway.
+server:
+  host: "0.0.0.0"
+  port: 8000
+  log_level: "info"
+  mcp_allowed_hosts:
+    - "hormozi-brain.internal"
+    - "hormozi-brain.internal:*"
+  mcp_allowed_origins:
+    - "https://agents.internal"
+
+packs:
+  - slug: "alex-hormozi-brain"
+    path: "private-input/packs/alex-hormozi-brain-v1"
+    index_dir: "runtime/ep-mcp-index/alex-hormozi-brain"
+    api_keys: []
+
+embedding:
+  provider: "openai"
+  model: "text-embedding-3-small"
+
+retrieval:
+  default_max_results: 10
+  mmr_enabled: true
+  mmr_lambda: 0.7
+  requires_expansion_enabled: true
