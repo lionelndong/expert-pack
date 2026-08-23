@@ -18,6 +18,7 @@ from pathlib import Path
 import re
 import shutil
 import subprocess
+import tempfile
 import zipfile
 from html.parser import HTMLParser
 from urllib.parse import parse_qs, urlparse
@@ -215,6 +216,46 @@ def build_transcripts(output: Path, ledger: list[dict[str, object]]) -> dict[str
         "transcript_atoms": atom_count,
         "official_channel_enumeration": "pending_ytdlp_and_channel_verification",
     }
+
+
+def merge_preserved_official(output: Path, preserved: Path | None, ledger: list[dict[str, object]], transcript_report: dict[str, object]) -> None:
+    """Restore caption atoms acquired by fetch_official after a rebuild."""
+    if preserved is None:
+        return
+    youtube_source = preserved / "youtube"
+    youtube_target = output / "youtube"
+    youtube_target.mkdir(parents=True, exist_ok=True)
+    existing_ids = {str(row.get("video_id")) for row in ledger if row.get("video_id")}
+    added = 0
+    for path in sorted(youtube_source.glob("*.md")) if youtube_source.is_dir() else []:
+        text = path.read_text(encoding="utf-8", errors="replace")
+        if "official:" not in text:
+            continue
+        match = re.search(r"-([A-Za-z0-9_-]{11})-part-\d{3}\.md$", path.name)
+        if not match:
+            continue
+        video_id = match.group(1)
+        destination = youtube_target / path.name
+        if not destination.exists():
+            shutil.copy2(path, destination)
+        if video_id not in existing_ids:
+            ledger.append({"record_id": f"youtube-{video_id}", "kind": "derived_youtube_video", "title": path.stem, "status": "included_official_caption", "video_id": video_id, "source_file": text.split("Transcript file:", 1)[-1].splitlines()[0].strip(" `") if "Transcript file:" in text else "official-channel", "pack_membership": "youtube"})
+            existing_ids.add(video_id)
+            added += 1
+    catalog_path = preserved / "meta" / "official-channel-catalog.json"
+    if catalog_path.is_file():
+        output_meta = output / "meta"
+        output_meta.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(catalog_path, output_meta / catalog_path.name)
+        try:
+            catalog = json.loads(catalog_path.read_text(encoding="utf-8"))
+            videos = [video for channel in catalog.get("channels", []) for video in channel.get("videos", [])]
+            transcript_report["official_channel_video_count"] = len(videos)
+            transcript_report["official_catalog_status_counts"] = dict(Counter(str(video.get("status", "unknown")) for video in videos))
+        except (OSError, json.JSONDecodeError, TypeError):
+            transcript_report["official_catalog_status_counts"] = {"catalog_read_error": 1}
+    transcript_report["official_caption_videos"] = added
+    transcript_report["official_channel_enumeration"] = "verified_channel_catalog_present"
 
 
 class TextExtractor(HTMLParser):
@@ -464,7 +505,9 @@ def write_pack(output: Path, ledger: list[dict[str, object]], transcript_report:
     coverage_body = "\n".join(status_lines) + "\n"
     coverage_fm = {"title": "Brain coverage report", "type": "meta", "pack": "alex-hormozi-brain", "tags": ["coverage", "provenance"], "schema_version": "4.1", "id": "alex-hormozi-brain/meta/source-coverage", "content_hash": sha256_text(coverage_body), "retrieval_strategy": "on_demand", "verified_at": "2026-08-23", "verified_by": "brain-builder", "confidence": "crawled"}
     (meta / "source-coverage.md").write_text("---\n" + yaml.safe_dump(coverage_fm, sort_keys=False, allow_unicode=True).strip() + "\n---\n" + coverage_body, encoding="utf-8", newline="\n")
-    (output / "STATUS.md").write_text("# Brain status\n\n- Inventory records: " + str(inventory_count) + "\n- Structured YouTube videos: " + str(transcript_report["unique_videos"]) + "\n- Executable skill packages: " + str(len(skill_report.get("packages", []))) + "\n- Restricted playbooks: quarantined pending authorization\n- OpenAI embedding index: pending `OPENAI_API_KEY`\n- Official-channel expansion: pending explicit yt-dlp acquisition\n", encoding="utf-8", newline="\n")
+    official_status = transcript_report.get("official_catalog_status_counts", {})
+    official_line = "verified catalog present" if official_status else "pending explicit yt-dlp acquisition"
+    (output / "STATUS.md").write_text("# Brain status\n\n- Inventory records: " + str(inventory_count) + "\n- Structured YouTube videos: " + str(transcript_report["unique_videos"]) + "\n- Official-channel catalog videos: " + str(transcript_report.get("official_channel_video_count", "unknown")) + "\n- Official-channel caption records: " + str(transcript_report.get("official_caption_videos", 0)) + "\n- Executable skill packages: " + str(len(skill_report.get("packages", []))) + "\n- Restricted playbooks: quarantined pending authorization\n- OpenAI embedding index: pending `OPENAI_API_KEY`\n- Official-channel expansion: " + official_line + "\n", encoding="utf-8", newline="\n")
 
 
 def main() -> int:
@@ -480,7 +523,20 @@ def main() -> int:
     private_root = (ROOT / "private-input").resolve()
     if private_root not in output.parents:
         raise SystemExit("output must be inside private-input")
+    preserved: Path | None = None
     if output.exists():
+        preserved = Path(tempfile.mkdtemp(prefix="hormozi-official-preserve-"))
+        existing_youtube = output / "youtube"
+        if existing_youtube.is_dir():
+            (preserved / "youtube").mkdir(parents=True, exist_ok=True)
+            for path in existing_youtube.glob("*.md"):
+                text = path.read_text(encoding="utf-8", errors="replace")
+                if "official:" in text:
+                    shutil.copy2(path, preserved / "youtube" / path.name)
+        catalog = output / "meta" / "official-channel-catalog.json"
+        if catalog.is_file():
+            (preserved / "meta").mkdir(parents=True, exist_ok=True)
+            shutil.copy2(catalog, preserved / "meta" / catalog.name)
         shutil.rmtree(output)
     output.mkdir(parents=True)
     manifest = json.loads(args.manifest.read_text(encoding="utf-8"))
@@ -489,6 +545,7 @@ def main() -> int:
     ledger = make_ledger(manifest, evidence, skill_sources)
     counts = {"evidence": copy_md(ROOT / "private-input/packs/alex-hormozi-evidence-v4/concepts", output / "evidence"), "curated-skills": copy_md(ROOT / "private-input/packs/alex-hormozi-skills-v2/concepts", output / "curated-skills")}
     transcript_report = build_transcripts(output, ledger)
+    merge_preserved_official(output, preserved, ledger, transcript_report)
     skill_report = copy_skills(output)
     extras: dict[str, object] = {"ebook": [], "audio": [], "ocr": {"status": "pending_external_ocr_tooling", "pages": 442}}
     seen_hashes: set[str] = set()
@@ -506,6 +563,10 @@ def main() -> int:
             elif not args.no_audio_metadata:
                 extras["audio"].append(audio_metadata(path, output, ledger))
     write_pack(output, ledger, transcript_report, skill_report, counts, extras)
+    if preserved is not None:
+        # The preservation staging directory contains private transcript text;
+        # remove it after the new pack is written.
+        shutil.rmtree(preserved, ignore_errors=True)
     print(json.dumps({"output": str(output), "inventory_records": sum(row.get("kind") == "inventory_record" for row in ledger), "derived_records": sum(row.get("kind") != "inventory_record" for row in ledger), "transcripts": transcript_report, "packs": counts, "skills": skill_report, "extras": extras}, indent=2, ensure_ascii=False))
     return 0
 

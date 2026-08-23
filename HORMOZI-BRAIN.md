@@ -62,8 +62,9 @@ The server binds only to `127.0.0.1` and keeps its generated index under
 This is a local development setup, not a company-network deployment. Before
 exposing it beyond the machine, put the MCP endpoints behind your company’s
 authenticated gateway and explicitly configure the allowed origins. The
-runtime’s optional API-key check covers its direct HTTP search route, not the
-mounted MCP routes.
+runtime applies the per-pack API-key policy to both its direct HTTP search
+route and mounted MCP routes; the company gateway should still provide the
+network-level controls, rate limits, and audit logging.
 
 ## Rebuild an approved private pack
 
