@@ -64,7 +64,9 @@ exposing it beyond the machine, put the MCP endpoints behind your company’s
 authenticated gateway and explicitly configure the allowed origins. The
 runtime applies the per-pack API-key policy to both its direct HTTP search
 route and mounted MCP routes; the company gateway should still provide the
-network-level controls, rate limits, and audit logging.
+network-level controls, distributed rate limits, and audit logging. The
+company example also enables a process-local rate limit and JSONL query audit
+path; network binds fail closed when `EP_MCP_KEY_ALEX_HORMOZI_BRAIN` is absent.
 
 ## Rebuild an approved private pack
 

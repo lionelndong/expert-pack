@@ -4,6 +4,12 @@ server:
   host: "0.0.0.0"
   port: 8000
   log_level: "info"
+  # Keep an append-only audit trail outside the private source pack.
+  query_log_path: "/var/log/ep-mcp/hormozi-queries.jsonl"
+  rate_limit:
+    enabled: true
+    requests_per_minute: 120
+    burst: 20
   mcp_allowed_hosts:
     - "hormozi-brain.internal"
     - "hormozi-brain.internal:*"
