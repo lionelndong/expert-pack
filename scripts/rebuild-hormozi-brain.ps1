@@ -1,5 +1,9 @@
 [CmdletBinding()]
-param()
+param(
+    [switch]$RunOpenAIGates,
+    [string]$RestrictedAuthorizationPath,
+    [switch]$RunRestrictedOcr
+)
 
 $ErrorActionPreference = "Stop"
 $repositoryRoot = Split-Path -Parent $PSScriptRoot
@@ -10,17 +14,30 @@ if (-not (Test-Path -LiteralPath $python)) {
 }
 
 $env:PYTHONIOENCODING = "utf-8"
-$steps = @(
-    @{ Name = "build"; Args = @("tools/hormozi-brain/build_brain.py") },
-    @{ Name = "OCR review packet"; Args = @(
+
+function Invoke-PythonStep {
+    param(
+        [Parameter(Mandatory = $true)][string]$Name,
+        [Parameter(Mandatory = $true)][string[]]$Args
+    )
+
+    Write-Host "==> $Name"
+    & $python @Args
+    if ($LASTEXITCODE -ne 0) {
+        throw "Step failed: $Name"
+    }
+}
+
+function Invoke-ValidationSteps {
+    Invoke-PythonStep "OCR review packet" @(
         "tools/hormozi-brain/make_ocr_review_packet.py",
         "--root", "private-input/ocr-results",
         "--output", "private-input/ocr-results/manual-review"
-    ) },
-    @{ Name = "skill validation"; Args = @("tools/hormozi-brain/validate_skills.py") },
-    @{ Name = "embedding estimate"; Args = @("tools/hormozi-brain/estimate_embeddings.py", "--pack", "private-input/packs/alex-hormozi-brain-v1") },
-    @{ Name = "quality benchmark"; Args = @("tools/hormozi-brain/quality_check.py", "--pack", "private-input/packs/alex-hormozi-brain-v1") },
-    @{ Name = "official transcription estimate"; Args = @(
+    )
+    Invoke-PythonStep "skill validation" @("tools/hormozi-brain/validate_skills.py")
+    Invoke-PythonStep "embedding estimate" @("tools/hormozi-brain/estimate_embeddings.py", "--pack", "private-input/packs/alex-hormozi-brain-v1")
+    Invoke-PythonStep "quality benchmark" @("tools/hormozi-brain/quality_check.py", "--pack", "private-input/packs/alex-hormozi-brain-v1")
+    Invoke-PythonStep "official transcription estimate" @(
         "tools/hormozi-brain/transcribe_official.py",
         "--video-id", "OVhNSzFSoZs",
         "--video-id", "FXzDLLdxsCk",
@@ -32,21 +49,81 @@ $steps = @(
         "--output", "private-input/packs/alex-hormozi-brain-v1",
         "--metadata-cache", "private-input/official-channel-metadata-cache.json",
         "--estimate-only"
-    ) },
-    @{ Name = "decision-support contract preflight"; Args = @("tools/hormozi-brain/evaluate_decision_support.py") },
-    @{ Name = "company readiness"; Args = @("tools/hormozi-brain/company_readiness.py") },
-    @{ Name = "acceptance audit"; Args = @("tools/hormozi-brain/acceptance_audit.py") }
+    )
+    Invoke-PythonStep "decision-support contract preflight" @("tools/hormozi-brain/evaluate_decision_support.py")
+    Invoke-PythonStep "company readiness" @("tools/hormozi-brain/company_readiness.py")
+    Invoke-PythonStep "acceptance audit" @("tools/hormozi-brain/acceptance_audit.py")
+}
+
+$officialCaptionlessIds = @(
+    "OVhNSzFSoZs", "FXzDLLdxsCk", "FKWEybUIda4",
+    "sSEm3qJUh9s", "A4L3byKcYQg", "Gh9zWsP8JpI"
 )
 
 Push-Location $repositoryRoot
 try {
-    foreach ($step in $steps) {
-        Write-Host "==> $($step.Name)"
-        & $python @($step.Args)
-        if ($LASTEXITCODE -ne 0) {
-            throw "Step failed: $($step.Name)"
-        }
+    if ($RunRestrictedOcr -and [string]::IsNullOrWhiteSpace($RestrictedAuthorizationPath)) {
+        throw "-RunRestrictedOcr requires -RestrictedAuthorizationPath"
     }
+    if ($RunOpenAIGates -and [string]::IsNullOrWhiteSpace($env:OPENAI_API_KEY)) {
+        throw "-RunOpenAIGates requires OPENAI_API_KEY; no media or source text was opened"
+    }
+    if (-not [string]::IsNullOrWhiteSpace($RestrictedAuthorizationPath)) {
+        if (-not (Test-Path -LiteralPath $RestrictedAuthorizationPath)) {
+            throw "Restricted authorization record not found: $RestrictedAuthorizationPath"
+        }
+        $restrictedArgs = @(
+            "tools/hormozi-brain/process_restricted.py",
+            "--authorization", (Resolve-Path -LiteralPath $RestrictedAuthorizationPath).Path
+        )
+        if ($RunRestrictedOcr) {
+            $restrictedArgs += "--run-ocr"
+        }
+        Invoke-PythonStep "restricted authorization handoff" $restrictedArgs
+    }
+
+    Invoke-PythonStep "build" @("tools/hormozi-brain/build_brain.py")
+
+    if ($RunOpenAIGates) {
+        $catalog = "private-input/packs/alex-hormozi-brain-v1/meta/official-channel-catalog.json"
+        foreach ($videoId in $officialCaptionlessIds) {
+            Invoke-PythonStep "OpenAI transcription $videoId" @(
+                "tools/hormozi-brain/transcribe_official.py",
+                "--video-id", $videoId,
+                "--catalog", $catalog,
+                "--output", "private-input/packs/alex-hormozi-brain-v1"
+            )
+        }
+
+        $audioOutput = "private-input/audio-transcriptions"
+        New-Item -ItemType Directory -Force -Path $audioOutput | Out-Null
+        $manifest = Get-Content "private-input/inventory/hormozi-source-manifest.json" -Raw | ConvertFrom-Json
+        $seenAudioHashes = @{}
+        foreach ($source in @($manifest.sources)) {
+            $sourcePath = [string]$source.path
+            $extension = [IO.Path]::GetExtension($sourcePath).ToLowerInvariant()
+            if ($source.rights_status -eq "excluded" -or $extension -notin @(".mp3", ".wav", ".m4a", ".flac")) {
+                continue
+            }
+            $dedupeKey = if ([string]::IsNullOrWhiteSpace([string]$source.hash)) { $sourcePath } else { [string]$source.hash }
+            if ($seenAudioHashes.ContainsKey($dedupeKey)) {
+                continue
+            }
+            $seenAudioHashes[$dedupeKey] = $true
+            $stem = [IO.Path]::GetFileNameWithoutExtension($sourcePath) -replace "[^A-Za-z0-9_-]+", "-"
+            Invoke-PythonStep "OpenAI audio transcription $stem" @(
+                "tools/hormozi-brain/transcribe_audio.py",
+                "--audio", $sourcePath,
+                "--output", (Join-Path $audioOutput "$stem.json")
+            )
+        }
+        Invoke-PythonStep "rebuild with OpenAI enrichments" @(
+            "tools/hormozi-brain/build_brain.py",
+            "--audio-transcriptions-dir", $audioOutput
+        )
+    }
+
+    Invoke-ValidationSteps
 } finally {
     Pop-Location
 }

@@ -37,6 +37,22 @@ record to an approved manifest audio path, writes a cited atom under `audio/`,
 and marks the corresponding ledger record included. Unmatched or malformed
 outputs remain explicitly reported and are not ingested.
 
+For the complete authorized finalization flow, use the repository wrapper:
+
+```powershell
+.\scripts\rebuild-hormozi-brain.ps1 -RunOpenAIGates
+```
+
+That switch is required before any OpenAI transcription call; the default
+rebuild only estimates usage and never calls the API. Restricted processing is
+separate and requires an authorization record:
+
+```powershell
+.\scripts\rebuild-hormozi-brain.ps1 `
+  -RestrictedAuthorizationPath private-input/restricted-processing/authorization.json `
+  -RunRestrictedOcr
+```
+
 The OCR batch is driven only by the evidence report's approved page list,
 retains rendered PNGs for visual QA, records confidence, distinguishes true
 blank pages, and can repair malformed PDF indexes in a temporary copy through

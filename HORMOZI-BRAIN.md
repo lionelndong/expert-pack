@@ -122,6 +122,29 @@ For a full rebuild followed by regenerated validation artifacts, use:
 .\scripts\rebuild-hormozi-brain.ps1
 ```
 
+The rebuild script is fail-closed by default. After an approved API key is
+loaded into `OPENAI_API_KEY`, `-RunOpenAIGates` performs the six captionless
+official-video transcriptions and all deduplicated approved audio works, then
+rebuilds the pack and reruns the audits. It never runs those metered calls by
+default:
+
+```powershell
+.\scripts\rebuild-hormozi-brain.ps1 -RunOpenAIGates
+```
+
+After a documented restricted-source authorization record has been approved,
+the same script can perform the fail-closed handoff and optional OCR:
+
+```powershell
+.\scripts\rebuild-hormozi-brain.ps1 `
+  -RestrictedAuthorizationPath private-input/restricted-processing/authorization.json `
+  -RunRestrictedOcr
+```
+
+The authorization record is validated against
+`config/source-intake/restricted-authorization.schema.json`; without it, the
+two pricing-playbook files remain quarantined and unopened.
+
 This runs the pack builder, Paperclip skill validation, embedding-cost estimate,
 official-channel transcription estimate, offline retrieval benchmark,
 decision-support contract preflight, company preflight, and final acceptance
