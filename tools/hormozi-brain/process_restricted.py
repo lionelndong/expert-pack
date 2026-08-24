@@ -11,13 +11,13 @@ the restricted files.
 from __future__ import annotations
 
 import argparse
-from collections import defaultdict
-from datetime import datetime, timezone
 import hashlib
 import json
-from pathlib import Path
 import subprocess
 import sys
+from collections import defaultdict
+from datetime import datetime, timezone
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 RESTRICTED_IDS = {"qsrc-6c6e3045f49e5555", "qsrc-01130c01e9dc5522"}
@@ -30,7 +30,7 @@ def read_json(path: Path) -> dict:
     except (OSError, json.JSONDecodeError) as error:
         raise ValueError(f"cannot read JSON record: {path}") from error
     if not isinstance(value, dict):
-        raise ValueError(f"JSON record must be an object: {path}")
+        raise TypeError(f"JSON record must be an object: {path}")
     return value
 
 
@@ -43,6 +43,15 @@ def validate_authorization(record: dict) -> list[str]:
     sources = record.get("sources")
     if not isinstance(sources, list):
         return errors + ["sources must be a list"]
+    source_ids = [str(item.get("source_id", "")) for item in sources if isinstance(item, dict)]
+    duplicate_ids = sorted({source_id for source_id in source_ids if source_ids.count(source_id) > 1 and source_id})
+    if duplicate_ids:
+        errors.append(f"duplicate authorization entries: {', '.join(duplicate_ids)}")
+    unknown_ids = sorted(set(source_ids) - RESTRICTED_IDS)
+    if unknown_ids:
+        errors.append(f"authorization contains unknown sources: {', '.join(unknown_ids)}")
+    if len(sources) != len(RESTRICTED_IDS):
+        errors.append(f"authorization must contain exactly {len(RESTRICTED_IDS)} source entries")
     by_id = {str(item.get("source_id")): item for item in sources if isinstance(item, dict)}
     for source_id in sorted(RESTRICTED_IDS):
         item = by_id.get(source_id)

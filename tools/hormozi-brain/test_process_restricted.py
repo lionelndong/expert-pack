@@ -4,7 +4,6 @@ from pathlib import Path
 
 import pytest
 
-
 MODULE_PATH = Path(__file__).with_name("process_restricted.py")
 SPEC = importlib.util.spec_from_file_location("hormozi_restricted", MODULE_PATH)
 assert SPEC and SPEC.loader
@@ -58,3 +57,19 @@ def test_authorized_processing_hashes_and_deduplicates(tmp_path):
     assert report["unique_work_count"] == 1
     assert report["duplicate_groups"][0]["duplicate"] is True
     assert report["ocr_requested"] is False
+
+
+def test_authorization_rejects_extra_or_duplicate_source_entries():
+    record = authorization_record()
+    record["sources"].append(dict(record["sources"][0]))
+    errors = RESTRICTED.validate_authorization(record)
+    assert any("duplicate authorization entries" in error for error in errors)
+    assert any("exactly 2 source entries" in error for error in errors)
+
+
+def test_authorization_rejects_unknown_source_id():
+    record = authorization_record()
+    record["sources"][0]["source_id"] = "unrelated-source"
+    errors = RESTRICTED.validate_authorization(record)
+    assert any("unknown sources" in error for error in errors)
+    assert any(f"missing authorization for {IDS[0]}" in error for error in errors)
