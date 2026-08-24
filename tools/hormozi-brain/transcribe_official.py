@@ -182,6 +182,35 @@ def estimate_video(entry: dict, model: str, chunk_seconds: int, price_per_minute
         "media_downloaded": False,
         "api_called": False,
         "usage_estimate": "audio duration and request count; token usage varies by speech content",
+        "metadata_status": "available",
+        "metadata_source": "yt-dlp",
+    }
+
+
+def estimate_from_metadata(entry: dict, metadata: dict, model: str, chunk_seconds: int, price_per_minute: float | None) -> dict:
+    """Build the same estimate from a read-only metadata cache, never media."""
+
+    duration = float(metadata.get("duration_seconds") or 0)
+    if duration <= 0:
+        raise ValueError("metadata cache duration_seconds must be positive")
+    chunks = plan_chunks(duration, chunk_seconds)
+    return {
+        "video_id": str(entry["video_id"]),
+        "title": str(metadata.get("title") or entry.get("title") or entry["video_id"]),
+        "url": str(metadata.get("url") or entry["url"]),
+        "duration_seconds": duration,
+        "duration_iso": metadata.get("duration_iso"),
+        "estimated_audio_minutes": round(duration / 60, 3),
+        "estimated_chunks": len(chunks),
+        "chunk_seconds": chunk_seconds,
+        "model": model,
+        "price_per_minute_usd": price_per_minute,
+        "projected_transcription_cost_usd": round(duration / 60 * price_per_minute, 6) if price_per_minute is not None else None,
+        "media_downloaded": False,
+        "api_called": False,
+        "usage_estimate": "audio duration and request count; token usage varies by speech content",
+        "metadata_status": "available",
+        "metadata_source": str(metadata.get("metadata_source") or "approved metadata cache"),
     }
 
 
@@ -215,19 +244,34 @@ def main() -> int:
     parser.add_argument("--chunk-seconds", type=int, default=600)
     parser.add_argument("--retries", type=int, default=3)
     parser.add_argument("--price-per-minute-usd", type=float, help="Optional approved transcription price used only for a projected estimate")
+    parser.add_argument("--metadata-cache", type=Path, help="Optional read-only JSON cache of browser-verified video durations")
     parser.add_argument("--estimate-only", action="store_true", help="Use metadata only; do not download media or call OpenAI")
     args = parser.parse_args()
     if not args.catalog.is_file():
         raise SystemExit(f"Official-channel catalog not found: {args.catalog}")
     catalog = json.loads(args.catalog.read_text(encoding="utf-8"))
     videos = {str(video.get("video_id")): video for channel in catalog.get("channels", []) for video in channel.get("videos", [])}
+    metadata_cache: dict[str, dict] = {}
+    if args.metadata_cache:
+        try:
+            cache = json.loads(args.metadata_cache.read_text(encoding="utf-8"))
+            metadata_cache = {
+                str(item["video_id"]): item
+                for item in cache.get("videos", [])
+                if isinstance(item, dict) and item.get("video_id")
+            }
+        except (OSError, json.JSONDecodeError, AttributeError, TypeError, KeyError) as error:
+            raise SystemExit(f"Invalid official metadata cache: {type(error).__name__}") from error
     estimates: list[dict] = []
     for video_id in args.video_id:
         if video_id not in videos:
             raise SystemExit(f"Video ID {video_id} is not present in the verified official catalog")
         if args.estimate_only:
             try:
-                estimates.append(estimate_video(videos[video_id], args.model, args.chunk_seconds, args.price_per_minute_usd))
+                if video_id in metadata_cache:
+                    estimates.append(estimate_from_metadata(videos[video_id], metadata_cache[video_id], args.model, args.chunk_seconds, args.price_per_minute_usd))
+                else:
+                    estimates.append(estimate_video(videos[video_id], args.model, args.chunk_seconds, args.price_per_minute_usd))
             except Exception as error:
                 estimates.append(unavailable_estimate(videos[video_id], args.model, args.chunk_seconds, args.price_per_minute_usd, error))
             continue

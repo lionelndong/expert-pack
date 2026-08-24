@@ -66,3 +66,25 @@ def test_unavailable_estimate_is_explicit_and_fail_closed():
     assert estimate["estimated_chunks"] is None
     assert estimate["media_downloaded"] is False
     assert estimate["api_called"] is False
+
+
+def test_metadata_cache_estimate_does_not_download_media():
+    estimate = OFFICIAL.estimate_from_metadata(
+        {"video_id": "ABCDEFGHIJK", "title": "Fallback", "url": "https://youtu.be/ABCDEFGHIJK"},
+        {
+            "video_id": "ABCDEFGHIJK",
+            "title": "Cached title",
+            "url": "https://www.youtube.com/watch?v=ABCDEFGHIJK",
+            "duration_seconds": 426,
+            "duration_iso": "PT7M6S",
+            "metadata_source": "youtube_page_meta[itemprop=duration]",
+        },
+        "test-model",
+        600,
+        0.01,
+    )
+    assert estimate["title"] == "Cached title"
+    assert estimate["estimated_chunks"] == 1
+    assert estimate["metadata_status"] == "available"
+    assert estimate["media_downloaded"] is False
+    assert estimate["api_called"] is False

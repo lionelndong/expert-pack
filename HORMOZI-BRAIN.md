@@ -133,4 +133,7 @@ the catalog, and removes all temporary media on exit.
 
 Before that call, use the same command with `--estimate-only` (and optionally
 `--price-per-minute-usd`) to write a metadata-only request/duration estimate;
-it neither downloads media nor calls OpenAI.
+it neither downloads media nor calls OpenAI. The rebuild script also uses the
+ignored `private-input/official-channel-metadata-cache.json` when a read-only
+browser session has already verified durations; if that cache is absent or
+stale, the estimator records the videos as pending instead of guessing.

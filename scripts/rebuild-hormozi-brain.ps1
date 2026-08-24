@@ -25,6 +25,7 @@ $steps = @(
         "--video-id", "Gh9zWsP8JpI",
         "--catalog", "private-input/packs/alex-hormozi-brain-v1/meta/official-channel-catalog.json",
         "--output", "private-input/packs/alex-hormozi-brain-v1",
+        "--metadata-cache", "private-input/official-channel-metadata-cache.json",
         "--estimate-only"
     ) },
     @{ Name = "decision-support contract preflight"; Args = @("tools/hormozi-brain/evaluate_decision_support.py") },
