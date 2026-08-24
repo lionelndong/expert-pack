@@ -20,6 +20,7 @@ import subprocess
 import tempfile
 import zipfile
 from collections import Counter, defaultdict
+from datetime import datetime, timezone
 from html.parser import HTMLParser
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
@@ -846,6 +847,36 @@ def integrate_restricted(
         "duplicate_groups": [],
     }
     if not resolution_path.is_file():
+        # Make the unresolved gap explicit without opening, hashing, or
+        # otherwise inspecting either quarantined PDF.  This report is safe to
+        # replace later with the authorized processor's resolution report.
+        resolution_path.parent.mkdir(parents=True, exist_ok=True)
+        quarantined = [
+            {
+                "source_id": str(row.get("source_id")),
+                "relative_path": row.get("relative_path"),
+                "status": "quarantined_restricted_authorization_required",
+                "hash_status": "not_computed_before_authorization",
+                "processing_status": "not_opened",
+            }
+            for row in manifest.get("quarantined_sources", [])
+            if isinstance(row, dict) and str(row.get("source_id")) in RESTRICTED_SOURCE_IDS
+        ]
+        report = {
+            "report_version": "1.0",
+            "status": "pending_external_authorization",
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "authorization_record": None,
+            "authorization_required": True,
+            "reason": "Rights owner, internal-processing scope, and approver have not been documented; restricted bytes were not opened or hashed.",
+            "sources": sorted(quarantined, key=lambda row: row["source_id"]),
+            "duplicate_groups": [],
+            "unique_work_count": 0,
+            "ocr_requested": False,
+            "ocr": [],
+        }
+        report["report"] = str(resolution_path.resolve())
+        resolution_path.write_text(json.dumps(report, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
         return result
     try:
         resolution = json.loads(resolution_path.read_text(encoding="utf-8"))

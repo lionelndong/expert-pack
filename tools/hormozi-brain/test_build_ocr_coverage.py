@@ -99,6 +99,11 @@ def test_restricted_handoff_is_fail_closed_without_resolution_report(tmp_path):
     result = BUILD.integrate_restricted(tmp_path / "pack", manifest, ledger, tmp_path / "missing-resolution.json")
     assert result["status"] == "pending_external_authorization"
     assert all(row["status"] == "quarantined_restricted_authorization_required" for row in ledger)
+    report = json.loads((tmp_path / "missing-resolution.json").read_text(encoding="utf-8"))
+    assert report["status"] == "pending_external_authorization"
+    assert report["authorization_required"] is True
+    assert report["sources"][0]["processing_status"] == "not_opened"
+    assert "sha256" not in json.dumps(report)
 
 
 def test_authorized_restricted_handoff_hashes_deduplicates_and_ingests_ocr(tmp_path):
