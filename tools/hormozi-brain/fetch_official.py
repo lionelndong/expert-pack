@@ -11,12 +11,14 @@ atoms into the local brain.
 from __future__ import annotations
 
 import argparse
+import html
 import json
 import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.request import Request, urlopen
+from xml.etree import ElementTree
 
 try:
     from yt_dlp import YoutubeDL
@@ -38,22 +40,79 @@ def parse_vtt(raw: str) -> str:
     return "\n".join(lines)
 
 
-def caption_url(info: dict) -> str | None:
-    tracks = info.get("subtitles") or info.get("automatic_captions") or {}
-    for language in ("en", "en-US", "en-GB"):
-        for item in tracks.get(language, []):
-            if item.get("url") and item.get("ext") in {"vtt", "srv3", "json3"}:
-                return str(item["url"])
-    for items in tracks.values():
-        if items and items[0].get("url"):
-            return str(items[0]["url"])
+def _clean_caption_text(value: str) -> str:
+    value = html.unescape(re.sub(r"<[^>]+>", "", value))
+    return re.sub(r"\s+", " ", value).strip()
+
+
+def parse_srv3(raw: str) -> str:
+    """Extract text nodes from YouTube's XML ``srv3`` caption format."""
+
+    root = ElementTree.fromstring(raw)
+    lines: list[str] = []
+    for element in root.iter():
+        if element.tag.rsplit("}", 1)[-1] != "text":
+            continue
+        value = _clean_caption_text("".join(element.itertext()))
+        if value and (not lines or lines[-1] != value):
+            lines.append(value)
+    return "\n".join(lines)
+
+
+def parse_json3(raw: str) -> str:
+    """Extract segment text from YouTube's ``json3`` caption format."""
+
+    payload = json.loads(raw)
+    lines: list[str] = []
+    for event in payload.get("events", []) if isinstance(payload, dict) else []:
+        segments = event.get("segs", []) if isinstance(event, dict) else []
+        value = _clean_caption_text("".join(str(segment.get("utf8", "")) for segment in segments if isinstance(segment, dict)))
+        if value and (not lines or lines[-1] != value):
+            lines.append(value)
+    return "\n".join(lines)
+
+
+def parse_caption(raw: str) -> str:
+    """Parse VTT, SRV3 XML, or JSON3 captions without trusting file suffixes."""
+
+    stripped = raw.lstrip()
+    if stripped.startswith(("{", "[")):
+        return parse_json3(raw)
+    if stripped.startswith("<"):
+        return parse_srv3(raw)
+    return parse_vtt(raw)
+
+
+def caption_track(info: dict) -> tuple[str, str, str] | None:
+    """Choose an English manual/automatic caption track, then any supported track."""
+
+    supported = {"vtt", "srv3", "json3"}
+    groups = (
+        ("manual", info.get("subtitles") or {}),
+        ("automatic", info.get("automatic_captions") or {}),
+    )
+    for origin, tracks in groups:
+        for language in ("en", "en-US", "en-GB"):
+            for item in tracks.get(language, []):
+                if item.get("url") and item.get("ext") in supported:
+                    return str(item["url"]), str(item["ext"]), origin
+    for origin, tracks in groups:
+        for items in tracks.values():
+            for item in items:
+                if item.get("url") and item.get("ext") in supported:
+                    return str(item["url"]), str(item["ext"]), origin
     return None
+
+
+def caption_url(info: dict) -> str | None:
+    track = caption_track(info)
+    return track[0] if track else None
 
 
 def fetch_caption(url: str) -> str:
     request = Request(url, headers={"User-Agent": "alex-hormozi-brain/1.0"})
     with urlopen(request, timeout=30) as response:
-        return parse_vtt(response.read().decode("utf-8", errors="replace"))
+        return parse_caption(response.read().decode("utf-8", errors="replace"))
 
 
 def fetch_missing_caption(entry: dict, channel_url: str, youtube_dir: Path, options: dict) -> tuple[str, dict]:
@@ -65,13 +124,13 @@ def fetch_missing_caption(entry: dict, channel_url: str, youtube_dir: Path, opti
         video_options["extract_flat"] = False
         with YoutubeDL(video_options) as ydl:
             info = ydl.extract_info(str(entry["url"]), download=False) or {}
-        track = caption_url(info)
+        track = caption_track(info)
         if not track:
             row["status"] = "caption_unavailable_pending_openai_transcription"
             row["caption_track_status"] = "no_manual_or_automatic_caption_track"
             row["caption_checked_at"] = datetime.now(timezone.utc).isoformat()
             return video_id, row
-        text = fetch_caption(track)
+        text = fetch_caption(track[0])
         if not text:
             row["status"] = "caption_empty"
             row["caption_track_status"] = "track_returned_empty"
@@ -97,7 +156,7 @@ def fetch_missing_caption(entry: dict, channel_url: str, youtube_dir: Path, opti
         destination = youtube_dir / f"{slug(str(entry.get('title') or video_id))}-{video_id}-part-001.md"
         destination.write_text(transcript_markdown(section), encoding="utf-8", newline="\n")
         row["status"] = "caption_ingested"
-        row["caption_track_status"] = "ingested"
+        row["caption_track_status"] = f"{track[2]}_{track[1]}_ingested"
         row["caption_checked_at"] = datetime.now(timezone.utc).isoformat()
     except Exception as error:  # Network/caption failures remain visible in the catalog.  # noqa: BLE001
         row["status"] = "caption_error"

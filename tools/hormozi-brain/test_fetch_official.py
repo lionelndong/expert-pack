@@ -59,3 +59,24 @@ def test_refresh_report_records_metadata_only_provenance(tmp_path, monkeypatch):
     assert report["captions_requested"] is False
     assert report["verified_channel_urls"] == ["https://www.youtube.com/@AlexHormozi/videos"]
     assert report["channels"][0]["channel"] == "Alex Hormozi"
+
+
+def test_caption_selection_checks_automatic_english_tracks():
+    track = FETCH.caption_track(
+        {
+            "subtitles": {"fr": [{"url": "manual-fr", "ext": "vtt"}]},
+            "automatic_captions": {"en": [{"url": "auto-en", "ext": "json3"}]},
+        }
+    )
+    assert track == ("auto-en", "json3", "automatic")
+    assert FETCH.caption_url(
+        {
+            "subtitles": {"fr": [{"url": "manual-fr", "ext": "vtt"}]},
+            "automatic_captions": {"en": [{"url": "auto-en", "ext": "json3"}]},
+        }
+    ) == "auto-en"
+
+
+def test_caption_parsers_support_srv3_and_json3():
+    assert FETCH.parse_caption('<transcript><text start="0">Hello &amp; welcome</text><text start="1">Hello &amp; welcome</text></transcript>') == "Hello & welcome"
+    assert FETCH.parse_caption(json.dumps({"events": [{"segs": [{"utf8": "Offer "}, {"utf8": "more value."}]}]})) == "Offer more value."
