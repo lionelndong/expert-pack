@@ -81,7 +81,9 @@ agent-first tools in addition to the generic ExpertPack tools:
   confidence, file provenance, normalized timestamp/page/chapter locators, and
   `citation_url` moment links for timestamped YouTube evidence.
 - `get_hormozi_source` — load the complete cited atom by source ID or
-  pack-relative path, with optional reconstruction metadata.
+  pack-relative path, including the same page/chapter/timestamp locator and
+  direct YouTube moment link when available, with optional reconstruction
+  metadata.
 - `get_hormozi_skill` — return one validated Paperclip skill entrypoint and its
   supporting file list.
 - `get_brain_coverage` — report inventory, duplicate/incomplete/quarantined
