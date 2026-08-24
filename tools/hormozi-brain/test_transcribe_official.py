@@ -28,3 +28,26 @@ def test_missing_key_fails_before_media_download(tmp_path, monkeypatch):
     monkeypatch.setattr(sys, "argv", ["transcribe_official.py", "--video-id", "ABCDEFGHIJK", "--catalog", str(catalog), "--output", str(tmp_path)])
     with pytest.raises(SystemExit, match="OPENAI_API_KEY"):
         OFFICIAL.main()
+
+
+def test_metadata_estimate_does_not_download_media(monkeypatch):
+    class FakeYDL:
+        def __init__(self, _options):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def extract_info(self, _url, download=False):
+            assert download is False
+            return {"duration": 125.0, "title": "Example"}
+
+    monkeypatch.setattr(OFFICIAL, "YoutubeDL", FakeYDL)
+    estimate = OFFICIAL.estimate_video({"video_id": "ABCDEFGHIJK", "url": "https://youtu.be/ABCDEFGHIJK"}, "test-model", 60, 0.01)
+    assert estimate["estimated_chunks"] == 3
+    assert estimate["media_downloaded"] is False
+    assert estimate["api_called"] is False
+    assert estimate["projected_transcription_cost_usd"] == round(125 / 60 * 0.01, 6)

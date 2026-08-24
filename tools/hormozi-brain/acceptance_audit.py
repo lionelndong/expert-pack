@@ -37,6 +37,7 @@ def main() -> int:
     quality = read_json(pack / "meta/quality-report.json")
     estimate = read_json(pack / "meta/embedding-estimate.json")
     catalog = read_json(pack / "meta/official-channel-catalog.json")
+    official_estimate = read_json(pack / "meta/official-transcription-estimate.json")
     container_path = pack / "meta/container-inspection.json"
     containers = read_json(container_path)
     readiness_path = pack / "meta/company-deployment-readiness.json"
@@ -58,6 +59,10 @@ def main() -> int:
         "inventory_ledger": check("pass" if len(inventory) == 428 and all(row.get("record_id") and row.get("status") for row in inventory) else "fail" if coverage else "pending", f"{len(inventory)} inventory records; every record has an ID and status"),
         "supplied_transcripts": check("pass" if coverage.get("transcripts", {}).get("unique_videos") == 273 and coverage.get("transcripts", {}).get("duplicate_sections_removed") == 3 else "fail" if coverage else "pending", f"{coverage.get('transcripts', {}).get('unique_videos')} unique videos; {coverage.get('transcripts', {}).get('transcript_atoms')} timestamped atoms"),
         "official_channel_coverage": check("pass" if len(catalog_videos) == 517 and set(catalog_statuses) <= {"already_present", "caption_ingested", "openai_transcribed", "caption_unavailable_pending_openai_transcription"} else "pending" if not catalog else "fail", f"{len(catalog_videos)} catalog videos; statuses={catalog_statuses}"),
+        "official_transcription_estimate": check(
+            "pass" if official_estimate.get("videos") and len(official_estimate.get("videos", [])) == 6 and official_estimate.get("api_called") is False and official_estimate.get("media_downloaded") is False else "pending" if not official_estimate else "fail",
+            f"{len(official_estimate.get('videos', []))} captionless videos; chunks={official_estimate.get('total_estimated_chunks')}; api_called={official_estimate.get('api_called')}; media_downloaded={official_estimate.get('media_downloaded')}",
+        ),
         "paperclip_skills": check("pass" if len(packages) == 24 and not missing_skills and not coverage.get("skills", {}).get("invalid") and skill_validation.get("overall_status") == "pass" else "fail", f"{len(packages)} packages; structural={not missing_skills}; workflow_validation={skill_validation.get('overall_status', 'missing')}"),
         "ocr_pages": check("pass" if ocr.get("requested_pages") == 442 and ocr.get("recovered_pages") == 442 else "pending", f"{ocr.get('recovered_pages', 0)}/{ocr.get('requested_pages', 0)} pages recovered; visual QA={ocr.get('visual_qa_status')}"),
         "container_formats": check(

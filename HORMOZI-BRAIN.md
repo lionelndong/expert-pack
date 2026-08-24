@@ -129,3 +129,7 @@ python tools/hormozi-brain/transcribe_official.py `
 The command downloads only temporary best-audio, sends chunk files to the
 existing OpenAI transcription endpoint, writes timestamped evidence, updates
 the catalog, and removes all temporary media on exit.
+
+Before that call, use the same command with `--estimate-only` (and optionally
+`--price-per-minute-usd`) to write a metadata-only request/duration estimate;
+it neither downloads media nor calls OpenAI.

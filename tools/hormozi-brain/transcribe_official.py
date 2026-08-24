@@ -158,6 +158,33 @@ def update_catalog(catalog_path: Path, video_id: str, result: dict) -> None:
     catalog_path.write_text(json.dumps(catalog, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 
 
+def estimate_video(entry: dict, model: str, chunk_seconds: int, price_per_minute: float | None) -> dict:
+    """Read metadata only and estimate media requests before any download/API call."""
+
+    if YoutubeDL is None:
+        raise RuntimeError("yt-dlp is required in the approved environment")
+    options = {"quiet": True, "no_warnings": True, "skip_download": True, "noplaylist": True, "js_runtimes": {"node": {}}}
+    with YoutubeDL(options) as ydl:
+        info = ydl.extract_info(str(entry["url"]), download=False) or {}
+    duration = float(info.get("duration") or 0)
+    chunks = plan_chunks(duration, chunk_seconds)
+    return {
+        "video_id": str(entry["video_id"]),
+        "title": str(info.get("title") or entry.get("title") or entry["video_id"]),
+        "url": str(entry["url"]),
+        "duration_seconds": duration,
+        "estimated_audio_minutes": round(duration / 60, 3),
+        "estimated_chunks": len(chunks),
+        "chunk_seconds": chunk_seconds,
+        "model": model,
+        "price_per_minute_usd": price_per_minute,
+        "projected_transcription_cost_usd": round(duration / 60 * price_per_minute, 6) if price_per_minute is not None else None,
+        "media_downloaded": False,
+        "api_called": False,
+        "usage_estimate": "audio duration and request count; token usage varies by speech content",
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--video-id", action="append", required=True, help="Catalog video ID; repeat for multiple videos")
@@ -166,19 +193,31 @@ def main() -> int:
     parser.add_argument("--model", default="gpt-4o-mini-transcribe")
     parser.add_argument("--chunk-seconds", type=int, default=600)
     parser.add_argument("--retries", type=int, default=3)
+    parser.add_argument("--price-per-minute-usd", type=float, help="Optional approved transcription price used only for a projected estimate")
+    parser.add_argument("--estimate-only", action="store_true", help="Use metadata only; do not download media or call OpenAI")
     args = parser.parse_args()
     if not args.catalog.is_file():
         raise SystemExit(f"Official-channel catalog not found: {args.catalog}")
     catalog = json.loads(args.catalog.read_text(encoding="utf-8"))
     videos = {str(video.get("video_id")): video for channel in catalog.get("channels", []) for video in channel.get("videos", [])}
+    estimates: list[dict] = []
     for video_id in args.video_id:
         if video_id not in videos:
             raise SystemExit(f"Video ID {video_id} is not present in the verified official catalog")
+        if args.estimate_only:
+            estimates.append(estimate_video(videos[video_id], args.model, args.chunk_seconds, args.price_per_minute_usd))
+            continue
         if not os.environ.get("OPENAI_API_KEY"):
             raise SystemExit("OPENAI_API_KEY is required; no media was opened or downloaded")
         result = transcribe_video(videos[video_id], args.output, args.model, args.chunk_seconds, args.retries)
         update_catalog(args.catalog, video_id, result)
         print(json.dumps({"video_id": video_id, **result}, ensure_ascii=False))
+    if args.estimate_only:
+        report_path = args.output / "meta" / "official-transcription-estimate.json"
+        report_path.parent.mkdir(parents=True, exist_ok=True)
+        report = {"report_version": "1.0", "model": args.model, "videos": estimates, "total_duration_seconds": sum(item["duration_seconds"] for item in estimates), "total_estimated_chunks": sum(item["estimated_chunks"] for item in estimates), "api_called": False, "media_downloaded": False, "output": str(report_path)}
+        report_path.write_text(json.dumps(report, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+        print(json.dumps({"status": "estimate_only", "videos": len(estimates), "output": str(report_path)}, indent=2))
     return 0
 
 

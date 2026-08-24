@@ -75,6 +75,7 @@ def main() -> int:
     parser.add_argument("--model", default="gpt-4o-mini-transcribe")
     parser.add_argument("--chunk-seconds", type=int, default=600)
     parser.add_argument("--retries", type=int, default=3)
+    parser.add_argument("--price-per-minute-usd", type=float, help="Optional approved transcription price used only for a projected estimate")
     parser.add_argument("--estimate-only", action="store_true")
     args = parser.parse_args()
     if not args.audio.is_file():
@@ -84,7 +85,19 @@ def main() -> int:
     except (OSError, subprocess.CalledProcessError, ValueError) as error:
         raise SystemExit(f"ffprobe could not inspect audio: {type(error).__name__}") from error
     chunks = plan_chunks(duration, args.chunk_seconds)
-    plan = {"audio": str(args.audio), "duration_seconds": duration, "chunk_seconds": args.chunk_seconds, "chunks": [{"start_seconds": start, "end_seconds": end} for start, end in chunks], "model": args.model, "timestamped": True}
+    plan = {
+        "audio": str(args.audio),
+        "duration_seconds": duration,
+        "estimated_audio_minutes": round(duration / 60, 3),
+        "chunk_seconds": args.chunk_seconds,
+        "estimated_chunks": len(chunks),
+        "chunks": [{"start_seconds": start, "end_seconds": end} for start, end in chunks],
+        "model": args.model,
+        "timestamped": True,
+        "usage_estimate": "audio duration and request count; token usage varies by speech content",
+        "price_per_minute_usd": args.price_per_minute_usd,
+        "projected_transcription_cost_usd": round(duration / 60 * args.price_per_minute_usd, 6) if args.price_per_minute_usd is not None else None,
+    }
     if args.estimate_only:
         args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_text(json.dumps({"status": "estimate_only", **plan}, indent=2) + "\n", encoding="utf-8")
