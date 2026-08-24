@@ -448,8 +448,8 @@ def audio_transcript_markdown(source: dict[str, object], payload: dict[str, obje
             text = str(segment.get("text", "")).strip()
             if text:
                 lines.append(f"{audio_timestamp(segment.get('start'))} {text}")
-    if not lines and str(payload.get("text", "")).strip():
-        lines = [str(payload["text"]).strip()]
+    # A plain text-only response cannot satisfy the pack's timestamp-locator
+    # contract, so the caller must keep it pending instead of ingesting it.
     transcript = "\n".join(lines).replace("[[", "[\u200b[")
     body = (
         f"# {title} — timestamped transcript\n\n"
@@ -523,6 +523,12 @@ def ingest_audio_transcriptions(
         if source is None:
             result["unmatched"].append(path.name)
             continue
+        if not isinstance(payload.get("segments"), list) or not any(
+            isinstance(segment, dict) and str(segment.get("text", "")).strip() and segment.get("start") is not None
+            for segment in payload["segments"]
+        ):
+            result["invalid"].append(path.name)
+            continue
         source_id = str(source.get("source_id") or source.get("path"))
         if source_id in seen_sources:
             result["duplicates"].append(path.name)
@@ -532,6 +538,10 @@ def ingest_audio_transcriptions(
         destination.write_text(audio_transcript_markdown(source, payload), encoding="utf-8", newline="\n")
         result["transcribed"] += 1
         result["outputs"].append(str(destination))
+        source["status"] = "included_audio_transcript"
+        source["transcription_provider"] = "openai"
+        source["timestamped"] = True
+        source["output"] = str(destination)
         ledger_id = f"derived-audio-{slug(Path(str(source.get('path', 'audio'))).stem)}"
         for row in ledger:
             if row.get("record_id") == ledger_id:
@@ -1224,7 +1234,7 @@ def main() -> int:
                 audio_result["source_id"] = source.get("source_id")
                 audio_result["hash"] = source.get("hash")
                 extras["audio"].append(audio_result)
-                audio_rows.append({"source_id": source.get("source_id"), "path": str(path), "relative_path": source.get("relative_path"), "hash": source.get("hash")})
+                audio_rows.append(audio_result)
     if audio_rows and not args.no_audio_metadata:
         extras["audio_transcriptions"] = ingest_audio_transcriptions(args.audio_transcriptions_dir, output, ledger, audio_rows)
     for ebook_result in extras["ebook"]:
