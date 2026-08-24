@@ -8,9 +8,6 @@ import json
 import os
 from pathlib import Path
 
-import yaml
-
-
 ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -25,10 +22,11 @@ def main() -> int:
     args = parser.parse_args()
     pack = args.pack.resolve()
     coverage = json.loads((pack / "meta/brain-coverage.json").read_text(encoding="utf-8"))
-    manifest = json.loads((ROOT / "private-input/inventory/hormozi-source-manifest.json").read_text(encoding="utf-8"))
     quality = json.loads((pack / "meta/quality-report.json").read_text(encoding="utf-8"))
     estimate = json.loads((pack / "meta/embedding-estimate.json").read_text(encoding="utf-8"))
     catalog = json.loads((pack / "meta/official-channel-catalog.json").read_text(encoding="utf-8"))
+    readiness_path = pack / "meta/company-deployment-readiness.json"
+    readiness = json.loads(readiness_path.read_text(encoding="utf-8")) if readiness_path.is_file() else {}
     skill_validation_path = pack / "meta/skill-validation.json"
     skill_validation = json.loads(skill_validation_path.read_text(encoding="utf-8")) if skill_validation_path.is_file() else {}
     skills_root = ROOT / "private-input/skills/alex-hormozi"
@@ -52,7 +50,10 @@ def main() -> int:
         "embeddings": check("pending_external_api" if not os.environ.get("OPENAI_API_KEY") else "ready_to_run", f"{estimate.get('estimated_input_tokens')} estimated tokens; projected=${estimate.get('projected_embedding_cost_usd')}; local_model={estimate.get('local_model')}"),
         "offline_retrieval": check("pass" if quality.get("relevant_top5_rate") == 1.0 and quality.get("valid_citation_top5_rate") == 1.0 else "fail", f"{quality.get('cases')} cases; top5 relevance={quality.get('relevant_top5_rate')}; locator validity={quality.get('valid_citation_top5_rate')}"),
         "semantic_retrieval": check("pending_external_api" if quality.get("semantic_embedding_evaluation") == "not_run" else "pass", "Requires a completed OpenAI vector index and semantic benchmark"),
-        "company_deployment": check("staged" if yaml.safe_load((ROOT / "config/ep-mcp.company.example.yaml").read_text(encoding="utf-8"))["server"].get("host") == "0.0.0.0" else "pending", "Company config stages host/origin allowlists, API-key auth, rate limits, and JSONL audit logging; deployment gateway is external"),
+        "company_deployment": check(
+            "pass" if readiness.get("overall_status") == "ready_for_gateway" else "staged" if readiness else "pending",
+            f"Company preflight={readiness.get('overall_status', 'not_run')}; external gateway, TLS, identity policy, and distributed limits remain outside this workspace",
+        ),
     }
     pending = [name for name, value in checks.items() if value["status"].startswith("pending") or value["status"] == "staged"]
     report = {"report_version": "1.0", "overall_status": "pending_external_gates" if pending else "pass", "pending_or_staged": pending, "checks": checks, "pack": str(pack)}

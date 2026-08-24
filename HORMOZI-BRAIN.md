@@ -70,6 +70,19 @@ network-level controls, distributed rate limits, and audit logging. The
 company example also enables a process-local rate limit and JSONL query audit
 path; network binds fail closed when `EP_MCP_KEY_ALEX_HORMOZI_BRAIN` is absent.
 
+Run the deployment preflight before handing the service to the company gateway:
+
+```powershell
+python tools/hormozi-brain/company_readiness.py
+```
+
+The preflight writes
+`private-input/packs/alex-hormozi-brain-v1/meta/company-deployment-readiness.json`.
+It checks the tracked network configuration, private-pack Git exclusion, OpenAI
+provider selection, and secret presence without printing secret values. A
+`ready_for_gateway` result still requires the company gateway to supply TLS,
+identity/access policy, distributed rate limiting, and its audit sink.
+
 ## Rebuild an approved private pack
 
 Use the inventory and rights decision tools before building. The builder only
