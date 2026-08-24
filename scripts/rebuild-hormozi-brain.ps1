@@ -29,6 +29,20 @@ function Invoke-PythonStep {
 }
 
 function Invoke-ValidationSteps {
+    Invoke-PythonStep "strict ExpertPack validation" @(
+        "-m", "expertpack", "validate",
+        "private-input/packs/alex-hormozi-brain-v1",
+        "--strict"
+    )
+    Push-Location "runtime/ep-mcp"
+    try {
+        Invoke-PythonStep "MCP pack loader validation" @(
+            "-m", "ep_mcp.cli", "validate",
+            "--pack", "..\..\private-input\packs\alex-hormozi-brain-v1"
+        )
+    } finally {
+        Pop-Location
+    }
     Invoke-PythonStep "OCR review packet" @(
         "tools/hormozi-brain/make_ocr_review_packet.py",
         "--root", "private-input/ocr-results",

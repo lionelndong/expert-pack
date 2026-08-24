@@ -122,7 +122,8 @@ For a full rebuild followed by regenerated validation artifacts, use:
 .\scripts\rebuild-hormozi-brain.ps1
 ```
 
-The rebuild script is fail-closed by default. After an approved API key is
+The rebuild script is fail-closed by default. Every rebuild now runs strict
+ExpertPack validation and an MCP pack-loader check. After an approved API key is
 loaded into `OPENAI_API_KEY`, `-RunOpenAIGates` performs the six captionless
 official-video transcriptions and all deduplicated approved audio works, then
 rebuilds the pack and reruns the audits. It never runs those metered calls by
