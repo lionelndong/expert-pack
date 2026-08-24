@@ -25,12 +25,19 @@ def main() -> int:
     embedding = raw.get("embedding", {})
     pack = next((item for item in packs if item.get("slug") == "alex-hormozi-brain"), {})
     pack_path = (ROOT / str(pack.get("path", ""))).resolve()
+    audit_path = Path(str(server.get("query_log_path", ""))).expanduser().resolve()
+    inline_pack_keys = any(bool(item.get("api_keys")) for item in packs if isinstance(item, dict))
+    try:
+        audit_inside_pack = audit_path.is_relative_to(pack_path)
+    except AttributeError:  # pragma: no cover - Python 3.8 compatibility.
+        audit_inside_pack = str(audit_path).startswith(str(pack_path) + os.sep)
     checks = {
         "network_bind": {"status": "pass" if server.get("host") not in {"127.0.0.1", "localhost", "::1"} else "fail", "detail": "company config binds beyond loopback"},
         "allowed_hosts": {"status": "pass" if server.get("mcp_allowed_hosts") else "fail", "detail": "MCP host allowlist is configured"},
         "allowed_origins": {"status": "pass" if server.get("mcp_allowed_origins") else "fail", "detail": "MCP origin allowlist is configured"},
         "rate_limit": {"status": "pass" if server.get("rate_limit", {}).get("enabled") and server.get("rate_limit", {}).get("requests_per_minute", 0) > 0 and server.get("rate_limit", {}).get("burst", 0) > 0 else "fail", "detail": "process-local safety limit is enabled"},
-        "audit_log": {"status": "pass" if server.get("query_log_path") else "fail", "detail": "JSONL audit path is configured"},
+        "audit_log": {"status": "pass" if server.get("query_log_path") and not audit_inside_pack else "fail", "detail": "JSONL audit path is configured outside the private pack"},
+        "no_inline_pack_keys": {"status": "fail" if inline_pack_keys else "pass", "detail": "pack API keys are injected through the environment/secret manager"},
         "private_pack": {"status": "pass" if pack_path.is_dir() else "fail", "detail": "generated private pack exists"},
         "private_pack_ignored": {"status": "pass" if subprocess.run(["git", "check-ignore", "-q", str(pack_path.relative_to(ROOT))], cwd=ROOT, check=False).returncode == 0 else "fail", "detail": "private pack is excluded from Git"},
         "openai_embedding_provider": {"status": "pass" if embedding.get("provider") == "openai" and embedding.get("model") == "text-embedding-3-small" else "fail", "detail": "direct OpenAI embedding provider is configured"},

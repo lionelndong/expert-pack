@@ -43,5 +43,7 @@ embedding:
     assert report["overall_status"] == "pending_external_prerequisites"
     assert report["failures"] == []
     assert {"mcp_secret", "openai_secret", "company_gateway"} <= set(report["pending"])
+    assert report["checks"]["audit_log"]["status"] == "pass"
+    assert report["checks"]["no_inline_pack_keys"]["status"] == "pass"
     assert "OPENAI_API_KEY" not in stdout
     assert "EP_MCP_KEY_ALEX_HORMOZI_BRAIN" not in stdout
