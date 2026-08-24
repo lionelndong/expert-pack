@@ -20,9 +20,18 @@ Optional follow-up adapters:
 ```powershell
 python tools/hormozi-brain/quality_check.py
 python tools/hormozi-brain/fetch_official.py --channel-url https://www.youtube.com/@AlexHormozi/videos --fetch-captions
-python tools/hormozi-brain/ocr_sources.py --pdf <approved.pdf> --pages 6 7 --output private-input/ocr/<source>
+python tools/hormozi-brain/run_ocr_batch.py
+python tools/hormozi-brain/qa_ocr_results.py
+python tools/hormozi-brain/make_ocr_contact_sheet.py
 python tools/hormozi-brain/transcribe_audio.py --audio <approved-audio> --output private-input/transcripts/audio.json
 ```
+
+The OCR batch is driven only by the evidence report's approved page list,
+retains rendered PNGs for visual QA, records confidence, distinguishes true
+blank pages, and can repair malformed PDF indexes in a temporary copy through
+`pikepdf`; originals are never rewritten. Low-confidence pages remain marked
+for human review until an owner signs off. Install the optional Python pieces
+from `tools/hormozi-brain/requirements-ocr.txt` alongside Poppler and Tesseract.
 
 `quality_check.py` is an offline lexical/provenance smoke test. It does not
 pretend to measure semantic embedding quality. Vector indexing requires

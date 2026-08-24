@@ -31,6 +31,7 @@ DEFAULT_OUTPUT = ROOT / "private-input/packs/alex-hormozi-brain-v1"
 DEFAULT_MANIFEST = ROOT / "private-input/inventory/hormozi-source-manifest.json"
 DEFAULT_EVIDENCE = ROOT / "private-input/inventory/hormozi-evidence-build-report-v4.json"
 DEFAULT_SKILLS_REPORT = ROOT / "private-input/inventory/hormozi-skills-build-report-v2.json"
+DEFAULT_OCR_RESULTS = ROOT / "private-input/ocr-results"
 VIDEO_HEADER = re.compile(r"^(.+?)\s+-\s+YouTube\s*$", re.I)
 VIDEO_URL = re.compile(r"https?://(?:www\.)?youtube\.com/watch\?v=[^\s]+", re.I)
 TIMESTAMP = re.compile(r"^\((\d{1,2}):(\d{2})(?::(\d{2}))?\)\s*(.*)$")
@@ -386,6 +387,95 @@ def copy_md(source: Path, destination: Path) -> int:
     return count
 
 
+def integrate_ocr(output: Path, ocr_root: Path, ledger: list[dict[str, object]]) -> dict[str, object]:
+    """Copy rendered OCR atoms and reconcile page status with the ledger."""
+    result: dict[str, object] = {
+        "status": "pending_external_ocr_tooling",
+        "requested_pages": 0,
+        "recovered_pages": 0,
+        "source_count": 0,
+        "low_confidence_pages": [],
+        "true_blank_pages": [],
+        "visual_qa_status": "not_started",
+        "results_dir": str(ocr_root),
+    }
+    if not ocr_root.is_dir():
+        return result
+    report_files = sorted((ocr_root / "reports").glob("*.json")) if (ocr_root / "reports").is_dir() else []
+    reports: list[dict[str, object]] = []
+    for report_path in report_files:
+        try:
+            reports.append(json.loads(report_path.read_text(encoding="utf-8")))
+        except (OSError, json.JSONDecodeError):
+            continue
+    result["source_count"] = len(reports)
+    result["requested_pages"] = sum(int(row.get("pages_requested", 0) if isinstance(row.get("pages_requested"), int) else len(row.get("pages_requested", []))) for row in reports)
+    result["recovered_pages"] = sum(int(row.get("pages_completed", 0)) for row in reports)
+    result["low_confidence_pages"] = [
+        {"source_id": row.get("source_id"), "pages": row.get("low_confidence_pages", [])}
+        for row in reports
+        if row.get("low_confidence_pages")
+    ]
+    if reports:
+        result["visual_qa_status"] = "rendered_pending_manual_review"
+    qa_lookup: dict[tuple[str, int], str] = {}
+    for report in reports:
+        for item in report.get("results", []):
+            try:
+                key = (str(item.get("source_id")), int(item.get("page")))
+            except (TypeError, ValueError):
+                continue
+            qa_lookup[key] = str(item.get("classification", ""))
+    qa_summary_path = ocr_root / "qa-summary.json"
+    if qa_summary_path.is_file():
+        try:
+            result["visual_qa_status"] = json.loads(qa_summary_path.read_text(encoding="utf-8")).get("visual_qa_status", result["visual_qa_status"])
+        except (OSError, json.JSONDecodeError):
+            pass
+    if result["requested_pages"] and result["recovered_pages"] == result["requested_pages"]:
+        result["status"] = "indexed_ocr_recovered_pending_manual_visual_qa"
+    elif result["recovered_pages"]:
+        result["status"] = "partially_recovered_ocr_pending"
+
+    atoms = sorted((ocr_root / "atoms").glob("*.md")) if (ocr_root / "atoms").is_dir() else []
+    meta_target = output / "meta"
+    meta_target.mkdir(parents=True, exist_ok=True)
+    for report_name in ("batch-report.json", "qa-summary.json"):
+        report_path = ocr_root / report_name
+        if report_path.is_file():
+            shutil.copy2(report_path, meta_target / f"ocr-{report_name}")
+    target = output / "ocr"
+    copied_by_source: dict[str, list[dict[str, object]]] = defaultdict(list)
+    for atom in atoms:
+        text = atom.read_text(encoding="utf-8", errors="replace")
+        match = re.search(r"^source_id:\s*([^\n]+)", text, re.M)
+        page_match = re.search(r"^source_page:\s*(\d+)", text, re.M)
+        source_id = match.group(1).strip().strip("'") if match else "unknown"
+        page = int(page_match.group(1)) if page_match else None
+        classification = qa_lookup.get((source_id, page), "") if page is not None else ""
+        destination = target / atom.name
+        if classification != "true_blank_page":
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(atom, destination)
+        else:
+            result["true_blank_pages"].append({"source_id": source_id, "page": page})
+        copied_by_source[source_id].append({"path": destination, "page": page, "title": atom.stem})
+        ledger.append({"record_id": f"ocr-{source_id}-page-{page:04d}" if page is not None else f"ocr-{source_id}-{atom.stem}", "kind": "derived_ocr_page", "title": atom.stem, "status": "ocr_true_blank_page" if classification == "true_blank_page" else ("included_ocr_page_manual_review" if classification else "included_ocr_page"), "source_id": source_id, "source_page": page, "source_file": str(atom), "pack_membership": "ocr"})
+    for row in ledger:
+        if row.get("kind") != "inventory_record" or not row.get("ocr_required_pages"):
+            continue
+        recovered = sorted(int(item["page"]) for item in copied_by_source.get(str(row.get("record_id")), []) if item.get("page") is not None)
+        expected = sorted(int(page) for page in row.get("ocr_required_pages", []))
+        if recovered:
+            row["ocr_recovered_pages"] = recovered
+            row["ocr_manual_visual_review"] = True
+            if recovered == expected:
+                row["status"] = "indexed_ocr_recovered_pending_manual_visual_qa"
+            else:
+                row["status"] = "indexed_ocr_partial_pending"
+    return result
+
+
 def copy_skills(output: Path) -> dict[str, object]:
     source = find_paperclip()
     result: dict[str, object] = {"status": "missing", "packages": [], "invalid": []}
@@ -487,11 +577,11 @@ def write_pack(output: Path, ledger: list[dict[str, object]], transcript_report:
         "updated": "2026-08-23",
         "freshness": {"refresh_cycle": "P30D", "last_full_review": "2026-08-23", "verified_file_count": included_count, "total_file_count": inventory_count, "coverage_pct": round(included_count / inventory_count * 100, 2) if inventory_count else 0},
         "authority_boundary": {"in_scope": "Evidence-backed frameworks and decision patterns represented by retrieved approved or public source records.", "out_of_scope": ["Claims without a supporting atom", "Current personal opinions, endorsements, or authorization by Alex Hormozi", "Quarantined, unauthorized, excluded, or unresolved sources", "Legal, tax, investment, medical, or regulated advice"], "refuse_when": ["No supporting source exists", "Source rights or provenance are unresolved"], "no_source_no_claim": True},
-        "context": {"always": ["overview.md", "STATUS.md"], "searchable": ["evidence/", "curated-skills/", "youtube/", "ebook/", "agent-skills/"], "on_demand": ["meta/"]},
+        "context": {"always": ["overview.md", "STATUS.md"], "searchable": ["evidence/", "curated-skills/", "youtube/", "ebook/", "ocr/", "agent-skills/"], "on_demand": ["meta/"]},
     }
     (output / "manifest.yaml").write_text(yaml.safe_dump(manifest, sort_keys=False, allow_unicode=True), encoding="utf-8", newline="\n")
-    (output / "overview.md").write_text("# Alex Hormozi — Complete Internal Brain\n\n> Source-grounded decision support. This corpus synthesizes retrieved evidence; it does not claim to be Alex Hormozi or speak for him.\n\n## Surfaces\n\n" + f"- {transcript_report['unique_videos']} structured YouTube transcript records.\n- {counts.get('evidence', 0)} approved evidence atoms.\n- {counts.get('curated-skills', 0)} curated skill-source atoms.\n- {len(skill_report.get('packages', []))} executable Paperclip skill packages.\n- EPUB/audio/OCR/channel gaps are explicit in `meta/brain-coverage.json`.\n", encoding="utf-8", newline="\n")
-    for directory in ("evidence", "curated-skills", "youtube", "ebook", "agent-skills", "meta"):
+    (output / "overview.md").write_text("# Alex Hormozi — Complete Internal Brain\n\n> Source-grounded decision support. This corpus synthesizes retrieved evidence; it does not claim to be Alex Hormozi or speak for him.\n\n## Surfaces\n\n" + f"- {transcript_report['unique_videos']} structured YouTube transcript records.\n- {counts.get('evidence', 0)} approved evidence atoms.\n- {counts.get('curated-skills', 0)} curated skill-source atoms.\n- {len(skill_report.get('packages', []))} executable Paperclip skill packages.\n- OCR/audio/channel gaps are explicit in `meta/brain-coverage.json`.\n", encoding="utf-8", newline="\n")
+    for directory in ("evidence", "curated-skills", "youtube", "ebook", "ocr", "agent-skills", "meta"):
         index_path = output / directory / "_index.md"
         index_path.parent.mkdir(parents=True, exist_ok=True)
         index_path.write_text(f"# {directory.replace('-', ' ').title()}\n\nGenerated navigation index for the private Hormozi brain.\n", encoding="utf-8", newline="\n")
@@ -507,7 +597,9 @@ def write_pack(output: Path, ledger: list[dict[str, object]], transcript_report:
     (meta / "source-coverage.md").write_text("---\n" + yaml.safe_dump(coverage_fm, sort_keys=False, allow_unicode=True).strip() + "\n---\n" + coverage_body, encoding="utf-8", newline="\n")
     official_status = transcript_report.get("official_catalog_status_counts", {})
     official_line = "verified catalog present" if official_status else "pending explicit yt-dlp acquisition"
-    (output / "STATUS.md").write_text("# Brain status\n\n- Inventory records: " + str(inventory_count) + "\n- Structured YouTube videos: " + str(transcript_report["unique_videos"]) + "\n- Official-channel catalog videos: " + str(transcript_report.get("official_channel_video_count", "unknown")) + "\n- Official-channel caption records: " + str(transcript_report.get("official_caption_videos", 0)) + "\n- Executable skill packages: " + str(len(skill_report.get("packages", []))) + "\n- Restricted playbooks: quarantined pending authorization\n- OpenAI embedding index: pending `OPENAI_API_KEY`\n- Official-channel expansion: " + official_line + "\n", encoding="utf-8", newline="\n")
+    ocr_status = extras.get("ocr", {})
+    ocr_line = f"{ocr_status.get('recovered_pages', 0)}/{ocr_status.get('requested_pages', 0)} pages recovered; visual QA remains explicit"
+    (output / "STATUS.md").write_text("# Brain status\n\n- Inventory records: " + str(inventory_count) + "\n- Structured YouTube videos: " + str(transcript_report["unique_videos"]) + "\n- Official-channel catalog videos: " + str(transcript_report.get("official_channel_video_count", "unknown")) + "\n- Official-channel caption records: " + str(transcript_report.get("official_caption_videos", 0)) + "\n- OCR: " + ocr_line + "\n- Executable skill packages: " + str(len(skill_report.get("packages", []))) + "\n- Restricted playbooks: quarantined pending authorization\n- OpenAI embedding index: pending `OPENAI_API_KEY`\n- Official-channel expansion: " + official_line + "\n", encoding="utf-8", newline="\n")
 
 
 def main() -> int:
@@ -516,6 +608,7 @@ def main() -> int:
     parser.add_argument("--manifest", type=Path, default=DEFAULT_MANIFEST)
     parser.add_argument("--evidence-report", type=Path, default=DEFAULT_EVIDENCE)
     parser.add_argument("--skills-report", type=Path, default=DEFAULT_SKILLS_REPORT)
+    parser.add_argument("--ocr-results", type=Path, default=DEFAULT_OCR_RESULTS)
     parser.add_argument("--no-epub", action="store_true")
     parser.add_argument("--no-audio-metadata", action="store_true")
     args = parser.parse_args()
@@ -547,7 +640,7 @@ def main() -> int:
     transcript_report = build_transcripts(output, ledger)
     merge_preserved_official(output, preserved, ledger, transcript_report)
     skill_report = copy_skills(output)
-    extras: dict[str, object] = {"ebook": [], "audio": [], "ocr": {"status": "pending_external_ocr_tooling", "pages": 442}}
+    extras: dict[str, object] = {"ebook": [], "audio": [], "ocr": integrate_ocr(output, args.ocr_results, ledger)}
     seen_hashes: set[str] = set()
     for source in manifest.get("sources", []):
         path = Path(str(source.get("path", "")))

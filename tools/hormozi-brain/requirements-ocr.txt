@@ -1,0 +1,4 @@
+# Optional local OCR recovery dependencies. The OCR engine binaries are
+# installed separately through the approved Poppler and Tesseract packages.
+Pillow>=12,<13
+pikepdf>=10,<11
