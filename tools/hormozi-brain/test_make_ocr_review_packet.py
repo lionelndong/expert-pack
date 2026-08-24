@@ -36,3 +36,16 @@ def test_packet_keeps_low_confidence_pages_pending(tmp_path):
     assert manifest["page_count"] == 1
     assert manifest["pages"][0]["review_status"] == "pending"
     assert manifest["pages"][0]["review_decision"] is None
+
+    manifest_path = tmp_path / "packet" / "manual-review-manifest.json"
+    persisted = json.loads(manifest_path.read_text(encoding="utf-8"))
+    persisted["pages"][0].update({
+        "review_status": "reviewed",
+        "review_decision": "accept_ocr",
+        "review_notes": "preserve this decision",
+        "reviewed_at_utc": "2026-01-01T00:00:00+00:00",
+    })
+    manifest_path.write_text(json.dumps(persisted), encoding="utf-8")
+    rebuilt = PACKET.build_packet(root, tmp_path / "packet")
+    assert rebuilt["visual_qa_status"] == "manual_review_complete"
+    assert rebuilt["pages"][0]["review_decision"] == "accept_ocr"

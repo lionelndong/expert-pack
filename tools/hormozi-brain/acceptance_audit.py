@@ -45,6 +45,7 @@ def main() -> int:
     skill_validation_path = pack / "meta/skill-validation.json"
     skill_validation = read_json(skill_validation_path)
     decision_eval = read_json(pack / "meta/decision-support-evaluation.json")
+    review_packet = read_json(ROOT / "private-input/ocr-results/manual-review/manual-review-manifest.json")
     skills_root = ROOT / "private-input/skills/alex-hormozi"
     inventory = [row for row in coverage.get("records", []) if row.get("kind") == "inventory_record"]
     restricted = [row for row in inventory if row.get("status") == "quarantined_restricted_authorization_required"]
@@ -53,6 +54,18 @@ def main() -> int:
     for video in catalog_videos:
         catalog_statuses[str(video.get("status"))] = catalog_statuses.get(str(video.get("status")), 0) + 1
     ocr = coverage.get("extras", {}).get("ocr", {})
+    expected_manual_review_pages = sum(
+        len(item.get("pages", []))
+        for item in ocr.get("low_confidence_pages", [])
+        if isinstance(item, dict)
+    )
+    packet_review_complete = (
+        review_packet.get("visual_qa_status") == "manual_review_complete"
+        and review_packet.get("page_count") == expected_manual_review_pages
+        and review_packet.get("reviewed_count") == expected_manual_review_pages
+        and review_packet.get("pending_count") == 0
+    )
+    ocr_visual_qa_complete = ocr.get("visual_qa_status") in {"complete", "manual_review_complete"} or packet_review_complete
     packages = sorted(path for path in skills_root.iterdir() if path.is_dir()) if skills_root.is_dir() else []
     missing_skills = [path.name for path in packages if not (path / "SKILL.md").is_file()]
     checks = {
@@ -65,10 +78,10 @@ def main() -> int:
         ),
         "paperclip_skills": check("pass" if len(packages) == 24 and not missing_skills and not coverage.get("skills", {}).get("invalid") and skill_validation.get("overall_status") == "pass" else "fail", f"{len(packages)} packages; structural={not missing_skills}; workflow_validation={skill_validation.get('overall_status', 'missing')}"),
         "ocr_pages": check(
-            "pass" if ocr.get("requested_pages") == 442 and ocr.get("recovered_pages") == 442 and ocr.get("visual_qa_status") in {"complete", "manual_review_complete"}
+            "pass" if ocr.get("requested_pages") == 442 and ocr.get("recovered_pages") == 442 and ocr_visual_qa_complete
             else "pending_manual_visual_qa" if ocr.get("requested_pages") == 442 and ocr.get("recovered_pages") == 442
             else "pending",
-            f"{ocr.get('recovered_pages', 0)}/{ocr.get('requested_pages', 0)} pages recovered; visual QA={ocr.get('visual_qa_status')}",
+            f"{ocr.get('recovered_pages', 0)}/{ocr.get('requested_pages', 0)} pages recovered; coverage QA={ocr.get('visual_qa_status')}; review packet={review_packet.get('visual_qa_status', 'missing')} ({review_packet.get('reviewed_count', 0)}/{review_packet.get('page_count', expected_manual_review_pages)} reviewed)",
         ),
         "container_formats": check(
             "pass" if containers.get("source_count") == 3 and not containers.get("unique_knowledge_ingested") and all(

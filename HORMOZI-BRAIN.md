@@ -39,6 +39,9 @@ committed to this repository.
   visual contact sheets and a stable page manifest for every low-confidence
   OCR page; the packet remains pending until a reviewer records an explicit
   decision.
+- `tools/hormozi-brain/review_ocr_packet.py` — records and validates one
+  reviewer decision per stable page ID, preserving an incomplete gate until
+  every page is explicitly classified.
 - `guides/agent-decision-support-contract.md` — required evidence-first rules
   for agents that consume the packs.
 - `guides/hormozi-restricted-source-authorization.md` — authorization record
@@ -115,6 +118,20 @@ manifest page must receive an explicit review decision before the acceptance
 audit can mark visual QA complete. It does not call the OpenAI API;
 embeddings, audio, and live-agent response evaluation remain explicitly
 pending until their approved inputs are supplied.
+
+Record a review decision only after visually checking the referenced page
+render. The command refuses unknown IDs, invalid decisions, and silent changes
+to an existing decision:
+
+```powershell
+python tools/hormozi-brain/review_ocr_packet.py `
+  --review-id src-...:page-0001 `
+  --decision accept_ocr `
+  --notes "Readable text; no re-OCR needed"
+```
+
+Use `--validate-only` to audit the manifest without changing it. Rebuilding
+the pack preserves decisions for unchanged stable source/page IDs.
 
 After exercising a real company agent, export one JSON object per line with
 `id`, `disposition`, and `response`, then run:
