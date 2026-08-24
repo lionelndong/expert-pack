@@ -15,24 +15,36 @@ def check(status: str, detail: str) -> dict[str, str]:
     return {"status": status, "detail": detail}
 
 
+def read_json(path: Path, default: dict | None = None) -> dict:
+    """Read an optional generated report without turning an incomplete rebuild into a crash."""
+
+    if not path.is_file():
+        return default.copy() if default else {}
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return default.copy() if default else {}
+    return value if isinstance(value, dict) else (default.copy() if default else {})
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--pack", type=Path, default=ROOT / "private-input/packs/alex-hormozi-brain-v1")
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()
     pack = args.pack.resolve()
-    coverage = json.loads((pack / "meta/brain-coverage.json").read_text(encoding="utf-8"))
-    quality = json.loads((pack / "meta/quality-report.json").read_text(encoding="utf-8"))
-    estimate = json.loads((pack / "meta/embedding-estimate.json").read_text(encoding="utf-8"))
-    catalog = json.loads((pack / "meta/official-channel-catalog.json").read_text(encoding="utf-8"))
+    coverage = read_json(pack / "meta/brain-coverage.json")
+    quality = read_json(pack / "meta/quality-report.json")
+    estimate = read_json(pack / "meta/embedding-estimate.json")
+    catalog = read_json(pack / "meta/official-channel-catalog.json")
     container_path = pack / "meta/container-inspection.json"
-    containers = json.loads(container_path.read_text(encoding="utf-8")) if container_path.is_file() else {}
+    containers = read_json(container_path)
     readiness_path = pack / "meta/company-deployment-readiness.json"
-    readiness = json.loads(readiness_path.read_text(encoding="utf-8")) if readiness_path.is_file() else {}
+    readiness = read_json(readiness_path)
     skill_validation_path = pack / "meta/skill-validation.json"
-    skill_validation = json.loads(skill_validation_path.read_text(encoding="utf-8")) if skill_validation_path.is_file() else {}
+    skill_validation = read_json(skill_validation_path)
     skills_root = ROOT / "private-input/skills/alex-hormozi"
-    inventory = [row for row in coverage["records"] if row.get("kind") == "inventory_record"]
+    inventory = [row for row in coverage.get("records", []) if row.get("kind") == "inventory_record"]
     restricted = [row for row in inventory if row.get("status") == "quarantined_restricted_authorization_required"]
     catalog_videos = [video for channel in catalog.get("channels", []) for video in channel.get("videos", [])]
     catalog_statuses = {}
@@ -42,9 +54,9 @@ def main() -> int:
     packages = sorted(path for path in skills_root.iterdir() if path.is_dir()) if skills_root.is_dir() else []
     missing_skills = [path.name for path in packages if not (path / "SKILL.md").is_file()]
     checks = {
-        "inventory_ledger": check("pass" if len(inventory) == 428 and all(row.get("record_id") and row.get("status") for row in inventory) else "fail", f"{len(inventory)} inventory records; every record has an ID and status"),
-        "supplied_transcripts": check("pass" if coverage.get("transcripts", {}).get("unique_videos") == 273 and coverage.get("transcripts", {}).get("duplicate_sections_removed") == 3 else "fail", f"{coverage.get('transcripts', {}).get('unique_videos')} unique videos; {coverage.get('transcripts', {}).get('transcript_atoms')} timestamped atoms"),
-        "official_channel_coverage": check("pass" if len(catalog_videos) == 517 and set(catalog_statuses) <= {"already_present", "caption_ingested", "caption_unavailable_pending_openai_transcription"} else "fail", f"{len(catalog_videos)} catalog videos; statuses={catalog_statuses}"),
+        "inventory_ledger": check("pass" if len(inventory) == 428 and all(row.get("record_id") and row.get("status") for row in inventory) else "fail" if coverage else "pending", f"{len(inventory)} inventory records; every record has an ID and status"),
+        "supplied_transcripts": check("pass" if coverage.get("transcripts", {}).get("unique_videos") == 273 and coverage.get("transcripts", {}).get("duplicate_sections_removed") == 3 else "fail" if coverage else "pending", f"{coverage.get('transcripts', {}).get('unique_videos')} unique videos; {coverage.get('transcripts', {}).get('transcript_atoms')} timestamped atoms"),
+        "official_channel_coverage": check("pass" if len(catalog_videos) == 517 and set(catalog_statuses) <= {"already_present", "caption_ingested", "caption_unavailable_pending_openai_transcription"} else "pending" if not catalog else "fail", f"{len(catalog_videos)} catalog videos; statuses={catalog_statuses}"),
         "paperclip_skills": check("pass" if len(packages) == 24 and not missing_skills and not coverage.get("skills", {}).get("invalid") and skill_validation.get("overall_status") == "pass" else "fail", f"{len(packages)} packages; structural={not missing_skills}; workflow_validation={skill_validation.get('overall_status', 'missing')}"),
         "ocr_pages": check("pass" if ocr.get("requested_pages") == 442 and ocr.get("recovered_pages") == 442 else "pending", f"{ocr.get('recovered_pages', 0)}/{ocr.get('requested_pages', 0)} pages recovered; visual QA={ocr.get('visual_qa_status')}"),
         "container_formats": check(
@@ -57,7 +69,7 @@ def main() -> int:
         "restricted_sources": check("pending_external_authorization" if len(restricted) == 2 else "fail", f"{len(restricted)} restricted records remain quarantined"),
         "audio": check("pending_external_api" if any(row.get("status") == "metadata_ready_pending_transcription" for row in coverage.get("extras", {}).get("audio", [])) else "pass", "Timestamped audio transcription requires OPENAI_API_KEY"),
         "embeddings": check("pending_external_api" if not os.environ.get("OPENAI_API_KEY") else "ready_to_run", f"{estimate.get('estimated_input_tokens')} estimated tokens; projected=${estimate.get('projected_embedding_cost_usd')}; local_model={estimate.get('local_model')}"),
-        "offline_retrieval": check("pass" if quality.get("relevant_top5_rate") == 1.0 and quality.get("valid_citation_top5_rate") == 1.0 else "fail", f"{quality.get('cases')} cases; top5 relevance={quality.get('relevant_top5_rate')}; locator validity={quality.get('valid_citation_top5_rate')}"),
+        "offline_retrieval": check("pass" if quality.get("relevant_top5_rate") == 1.0 and quality.get("valid_citation_top5_rate") == 1.0 else "pending" if not quality else "fail", f"{quality.get('cases')} cases; top5 relevance={quality.get('relevant_top5_rate')}; locator validity={quality.get('valid_citation_top5_rate')}"),
         "semantic_retrieval": check("pending_external_api" if quality.get("semantic_embedding_evaluation") == "not_run" else "pass", "Requires a completed OpenAI vector index and semantic benchmark"),
         "company_deployment": check(
             "pass" if readiness.get("overall_status") == "ready_for_gateway" else "staged" if readiness else "pending",
