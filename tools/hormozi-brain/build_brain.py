@@ -732,12 +732,19 @@ def integrate_restricted(
             return result
         source_ids = [str(item) for item in group.get("source_ids", [])]
         representative = str(group.get("representative_source_id", ""))
-        if not source_ids or representative not in source_ids:
+        group_hash = str(group.get("sha256", ""))
+        if not source_ids or representative not in source_ids or not group_hash.startswith("sha256:"):
             result.update(status="invalid_resolution_report", error="duplicate group representative is invalid")
+            return result
+        if any(str(reported_rows[source_id].get("sha256", "")) != group_hash for source_id in source_ids):
+            result.update(status="invalid_resolution_report", error="duplicate group hash does not match source hashes")
             return result
         group_ids.extend(source_ids)
     if sorted(group_ids) != sorted(RESTRICTED_SOURCE_IDS):
         result.update(status="invalid_resolution_report", error="duplicate groups must cover each restricted source exactly once")
+        return result
+    if int(resolution.get("unique_work_count", len(groups)) or 0) != len(groups):
+        result.update(status="invalid_resolution_report", error="unique_work_count does not match duplicate groups")
         return result
 
     by_id = {str(row.get("record_id")): row for row in ledger if row.get("kind") == "inventory_record"}
