@@ -55,7 +55,7 @@ def _make_sheet(cards: list[dict], output: Path, *, columns: int = 4, per_sheet:
     return generated
 
 
-def build_packet(root: Path, output: Path) -> dict:
+def build_packet(root: Path, output: Path, *, reuse_complete: bool = False) -> dict:
     previous_manifest: dict = {}
     previous_path = output / "manual-review-manifest.json"
     if previous_path.is_file():
@@ -103,9 +103,25 @@ def build_packet(root: Path, output: Path) -> dict:
                 record["reviewed_at_utc"] = prior.get("reviewed_at_utc")
             pages.append(record)
             by_source.setdefault(source_id, []).append(record)
-    sheets: list[str] = []
-    for source_id, records in sorted(by_source.items()):
-        sheets.extend(_make_sheet(records, output / "sheets"))
+    current_review_ids = {str(page["review_id"]) for page in pages}
+    previous_review_ids = set(previous_pages)
+    can_reuse_complete = (
+        reuse_complete
+        and previous_manifest.get("visual_qa_status") == "manual_review_complete"
+        and current_review_ids == previous_review_ids
+        and pages
+        and all(page.get("review_status") == "reviewed" for page in pages)
+    )
+    if can_reuse_complete:
+        # Individual QA renders may be cleaned up after review to save disk,
+        # while the source-grouped sheets and signed decisions remain the
+        # durable visual-QA evidence. Never reuse a complete packet if the
+        # underlying page set changed.
+        sheets = [str(path) for path in previous_manifest.get("sheets", [])]
+    else:
+        sheets = []
+        for source_id, records in sorted(by_source.items()):
+            sheets.extend(_make_sheet(records, output / "sheets"))
     manifest = {
         "report_version": "1.0",
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
@@ -135,8 +151,13 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path, default=Path("private-input/ocr-results"))
     parser.add_argument("--output", type=Path, default=Path("private-input/ocr-results/manual-review"))
+    parser.add_argument(
+        "--reuse-complete",
+        action="store_true",
+        help="reuse a previously complete packet when the reviewed page set is unchanged",
+    )
     args = parser.parse_args()
-    manifest = build_packet(args.root.resolve(), args.output.resolve())
+    manifest = build_packet(args.root.resolve(), args.output.resolve(), reuse_complete=args.reuse_complete)
     print(json.dumps({key: manifest[key] for key in ("visual_qa_status", "source_count", "page_count", "sheets")}, indent=2))
     return 0
 

@@ -46,7 +46,8 @@ function Invoke-ValidationSteps {
     Invoke-PythonStep "OCR review packet" @(
         "tools/hormozi-brain/make_ocr_review_packet.py",
         "--root", "private-input/ocr-results",
-        "--output", "private-input/ocr-results/manual-review"
+        "--output", "private-input/ocr-results/manual-review",
+        "--reuse-complete"
     )
     Invoke-PythonStep "skill validation" @("tools/hormozi-brain/validate_skills.py")
     Invoke-PythonStep "embedding estimate" @("tools/hormozi-brain/estimate_embeddings.py", "--pack", "private-input/packs/alex-hormozi-brain-v1")

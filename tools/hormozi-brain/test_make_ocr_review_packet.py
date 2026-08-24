@@ -49,3 +49,10 @@ def test_packet_keeps_low_confidence_pages_pending(tmp_path):
     rebuilt = PACKET.build_packet(root, tmp_path / "packet")
     assert rebuilt["visual_qa_status"] == "manual_review_complete"
     assert rebuilt["pages"][0]["review_decision"] == "accept_ocr"
+
+    # Once the durable review sheet exists, individual page renders can be
+    # cleaned up without reopening a completed QA gate.
+    image_path.unlink()
+    reused = PACKET.build_packet(root, tmp_path / "packet", reuse_complete=True)
+    assert reused["visual_qa_status"] == "manual_review_complete"
+    assert reused["sheets"]
