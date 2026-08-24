@@ -12,6 +12,11 @@ if (-not (Test-Path -LiteralPath $python)) {
 $env:PYTHONIOENCODING = "utf-8"
 $steps = @(
     @{ Name = "build"; Args = @("tools/hormozi-brain/build_brain.py") },
+    @{ Name = "OCR review packet"; Args = @(
+        "tools/hormozi-brain/make_ocr_review_packet.py",
+        "--root", "private-input/ocr-results",
+        "--output", "private-input/ocr-results/manual-review"
+    ) },
     @{ Name = "skill validation"; Args = @("tools/hormozi-brain/validate_skills.py") },
     @{ Name = "embedding estimate"; Args = @("tools/hormozi-brain/estimate_embeddings.py", "--pack", "private-input/packs/alex-hormozi-brain-v1") },
     @{ Name = "quality benchmark"; Args = @("tools/hormozi-brain/quality_check.py", "--pack", "private-input/packs/alex-hormozi-brain-v1") },

@@ -35,6 +35,10 @@ committed to this repository.
   response JSONL against the 20-case evidence/inference/conflict contract.
 - `tools/hormozi-brain/ocr_sources.py` and `transcribe_audio.py` — fail-closed
   adapters for remaining OCR/audio gaps.
+- `tools/hormozi-brain/make_ocr_review_packet.py` — creates source-grouped
+  visual contact sheets and a stable page manifest for every low-confidence
+  OCR page; the packet remains pending until a reviewer records an explicit
+  decision.
 - `guides/agent-decision-support-contract.md` — required evidence-first rules
   for agents that consume the packs.
 - `guides/hormozi-restricted-source-authorization.md` — authorization record
@@ -104,7 +108,11 @@ For a full rebuild followed by regenerated validation artifacts, use:
 This runs the pack builder, Paperclip skill validation, embedding-cost estimate,
 official-channel transcription estimate, offline retrieval benchmark,
 decision-support contract preflight, company preflight, and final acceptance
-audit. It does not call the OpenAI API;
+audit. It also regenerates
+`private-input/ocr-results/manual-review/manual-review-manifest.json` and its
+contact sheets. Low-confidence OCR is not accepted by metadata alone: each
+manifest page must receive an explicit review decision before the acceptance
+audit can mark visual QA complete. It does not call the OpenAI API;
 embeddings, audio, and live-agent response evaluation remain explicitly
 pending until their approved inputs are supplied.
 

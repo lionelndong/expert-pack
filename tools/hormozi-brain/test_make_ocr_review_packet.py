@@ -1,0 +1,38 @@
+import importlib.util
+import json
+from pathlib import Path
+
+from PIL import Image
+
+
+MODULE_PATH = Path(__file__).with_name("make_ocr_review_packet.py")
+SPEC = importlib.util.spec_from_file_location("hormozi_review_packet", MODULE_PATH)
+assert SPEC and SPEC.loader
+PACKET = importlib.util.module_from_spec(SPEC)
+SPEC.loader.exec_module(PACKET)
+
+
+def test_packet_keeps_low_confidence_pages_pending(tmp_path):
+    root = tmp_path / "ocr"
+    (root / "reports").mkdir(parents=True)
+    (root / "atoms").mkdir()
+    image_path = root / "page-0001.png"
+    Image.new("RGB", (40, 40), "white").save(image_path)
+    (root / "reports" / "src-test.json").write_text(json.dumps({
+        "source_id": "src-test",
+        "relative_path": "book.pdf",
+        "results": [{
+            "page": 1,
+            "classification": "low_confidence_manual_review",
+            "mean_confidence": 42.0,
+            "min_confidence": 0.0,
+            "word_count": 3,
+            "qa_image": str(image_path),
+            "manual_review_required": True,
+        }],
+    }), encoding="utf-8")
+    manifest = PACKET.build_packet(root, tmp_path / "packet")
+    assert manifest["visual_qa_status"] == "pending_manual_review"
+    assert manifest["page_count"] == 1
+    assert manifest["pages"][0]["review_status"] == "pending"
+    assert manifest["pages"][0]["review_decision"] is None
