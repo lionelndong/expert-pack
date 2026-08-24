@@ -33,6 +33,12 @@ COMPLETION_REQUIREMENTS = [
         "evidence": ["meta/official-channel-catalog.json", "meta/official-transcription-estimate.json"],
     },
     {
+        "id": "transcription_usage_estimates",
+        "requirement": "Metadata-only usage estimates exist before official-video or approved-audio transcription calls.",
+        "check": "transcription_usage_estimates",
+        "evidence": ["meta/official-transcription-estimate.json", "meta/audio-transcription-estimate.json"],
+    },
+    {
         "id": "official_captionless_transcripts",
         "requirement": "Every verified official-channel video without captions has an approved transcript or an explicit unresolved status.",
         "check": "official_captionless_transcripts",
@@ -225,6 +231,7 @@ def main() -> int:
     estimate = read_json(pack / "meta/embedding-estimate.json")
     catalog = read_json(pack / "meta/official-channel-catalog.json")
     official_estimate = read_json(pack / "meta/official-transcription-estimate.json")
+    audio_estimate = read_json(pack / "meta/audio-transcription-estimate.json")
     container_path = pack / "meta/container-inspection.json"
     containers = read_json(container_path)
     readiness_path = pack / "meta/company-deployment-readiness.json"
@@ -308,6 +315,18 @@ def main() -> int:
         "official_transcription_estimate": check(
             "pass" if official_estimate.get("videos") and len(official_estimate.get("videos", [])) == 6 and official_estimate.get("metadata_available") is True and official_estimate.get("api_called") is False and official_estimate.get("media_downloaded") is False else "pending_external_metadata" if official_estimate.get("videos") and official_estimate.get("metadata_available") is False else "pending" if not official_estimate else "fail",
             f"{len(official_estimate.get('videos', []))} captionless videos; chunks={official_estimate.get('total_estimated_chunks')}; api_called={official_estimate.get('api_called')}; media_downloaded={official_estimate.get('media_downloaded')}",
+        ),
+        "transcription_usage_estimates": check(
+            "pass"
+            if official_estimate.get("metadata_available") is True
+            and official_estimate.get("api_called") is False
+            and official_estimate.get("media_downloaded") is False
+            and audio_estimate.get("metadata_available") is True
+            and audio_estimate.get("api_called") is False
+            and audio_estimate.get("media_uploaded") is False
+            and audio_estimate.get("media_retained") is False
+            else "pending" if not official_estimate or not audio_estimate else "fail",
+            f"official_chunks={official_estimate.get('total_estimated_chunks')}; audio_chunks={audio_estimate.get('total_estimated_chunks')}; api_called={bool(official_estimate.get('api_called') or audio_estimate.get('api_called'))}",
         ),
         "paperclip_skills": check("pass" if len(packages) == 24 and not missing_skills and not coverage.get("skills", {}).get("invalid") and skill_validation.get("overall_status") == "pass" else "fail", f"{len(packages)} packages; structural={not missing_skills}; workflow_validation={skill_validation.get('overall_status', 'missing')}"),
         "book_to_skills_aliases": check(

@@ -216,3 +216,29 @@ def test_ingest_audio_transcription_preserves_timestamped_provenance(tmp_path):
     assert "[00:01:02] Then measure the result." in text
     assert "sha256:audio" in text
     assert any(row.get("kind") == "derived_audio_transcript" for row in ledger)
+
+
+def test_audio_transcription_estimate_is_explicit_and_metadata_only(tmp_path):
+    rows = [{
+        "source_id": "audio-source",
+        "hash": "sha256:audio",
+        "path": "library/Money Models.mp3",
+        "status": "metadata_ready_pending_transcription",
+        "metadata": {"duration": "13092.688662"},
+        "transcription_plan": {
+            "model": "gpt-4o-mini-transcribe",
+            "chunk_seconds": 600,
+            "chunk_count": 22,
+            "timestamped_segments": True,
+        },
+    }]
+    report = BUILD.write_audio_transcription_estimate(rows, tmp_path / "pack")
+    assert report["status"] == "ready_pending_openai_api"
+    assert report["metadata_available"] is True
+    assert report["total_estimated_chunks"] == 22
+    assert report["api_called"] is False
+    assert report["media_uploaded"] is False
+    output = tmp_path / "pack" / "meta" / "audio-transcription-estimate.json"
+    assert output.is_file()
+    saved = json.loads(output.read_text(encoding="utf-8"))
+    assert saved["sources"][0]["projected_transcription_cost_usd"] is None

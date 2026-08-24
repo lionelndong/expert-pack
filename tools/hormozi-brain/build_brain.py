@@ -504,6 +504,63 @@ def audio_metadata(path: Path, output: Path, ledger: list[dict[str, object]]) ->
     return result
 
 
+def write_audio_transcription_estimate(audio_rows: list[dict[str, object]], output: Path) -> dict[str, object]:
+    """Write an explicit, metadata-only usage estimate for approved audio.
+
+    The estimate is deliberately conservative: it reports duration and request
+    count but does not invent a price when the approved project has not supplied
+    one.  It also records that no API call or media upload occurred.
+    """
+
+    report_path = output / "meta" / "audio-transcription-estimate.json"
+    rows: list[dict[str, object]] = []
+    for item in audio_rows:
+        metadata = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
+        plan = item.get("transcription_plan") if isinstance(item.get("transcription_plan"), dict) else {}
+        raw_duration = metadata.get("duration")
+        try:
+            duration = float(raw_duration) if raw_duration is not None else None
+        except (TypeError, ValueError):
+            duration = None
+        rows.append({
+            "source_id": item.get("source_id"),
+            "source_hash": item.get("hash"),
+            "source_file": item.get("path"),
+            "status": item.get("status"),
+            "duration_seconds": duration,
+            "estimated_audio_minutes": round(duration / 60, 3) if duration is not None else None,
+            "chunk_seconds": plan.get("chunk_seconds", 600),
+            "estimated_chunks": plan.get("chunk_count"),
+            "model": plan.get("model", "gpt-4o-mini-transcribe"),
+            "timestamped_segments": bool(plan.get("timestamped_segments", True)),
+            "requires_openai_api_key": True,
+            "price_per_minute_usd": None,
+            "projected_transcription_cost_usd": None,
+            "api_called": False,
+            "media_uploaded": False,
+            "media_retained": False,
+            "usage_estimate": "audio duration and request count; token usage varies by speech content",
+        })
+    metadata_available = all(row["duration_seconds"] is not None and row["estimated_chunks"] is not None for row in rows)
+    report = {
+        "report_version": "1.0",
+        "status": "ready_pending_openai_api" if rows else "not_applicable",
+        "sources": rows,
+        "metadata_available": metadata_available,
+        "total_duration_seconds": sum(float(row["duration_seconds"]) for row in rows if row["duration_seconds"] is not None) if metadata_available else None,
+        "total_estimated_audio_minutes": round(sum(float(row["duration_seconds"]) for row in rows if row["duration_seconds"] is not None) / 60, 3) if metadata_available else None,
+        "total_estimated_chunks": sum(int(row["estimated_chunks"]) for row in rows if row["estimated_chunks"] is not None) if metadata_available else None,
+        "api_called": False,
+        "media_uploaded": False,
+        "media_retained": False,
+        "requires_openai_api_key": bool(rows),
+        "output": str(report_path),
+    }
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.write_text(json.dumps(report, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    return report
+
+
 def audio_timestamp(seconds: object) -> str:
     """Render an audio segment locator in a stable timestamp format."""
 
@@ -1398,6 +1455,7 @@ def main() -> int:
         "ebook": [],
         "audio": [],
         "audio_transcriptions": {},
+        "audio_transcription_estimate": {},
         "containers": container_report,
         "ocr": integrate_ocr(output, args.ocr_results, ledger),
         "restricted": integrate_restricted(output, manifest, ledger),
@@ -1423,6 +1481,7 @@ def main() -> int:
                 extras["audio"].append(audio_result)
                 audio_rows.append(audio_result)
     if audio_rows and not args.no_audio_metadata:
+        extras["audio_transcription_estimate"] = write_audio_transcription_estimate(audio_rows, output)
         extras["audio_transcriptions"] = ingest_audio_transcriptions(args.audio_transcriptions_dir, output, ledger, audio_rows)
     for ebook_result in extras["ebook"]:
         if ebook_result.get("status") != "included_extracted":

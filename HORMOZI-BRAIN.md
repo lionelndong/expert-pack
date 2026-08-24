@@ -162,7 +162,9 @@ two pricing-playbook files remain quarantined and unopened.
 This runs the pack builder, Paperclip skill validation, embedding-cost estimate,
 official-channel transcription estimate, offline retrieval benchmark,
 decision-support contract preflight, company preflight, and final acceptance
-audit. It also regenerates
+audit. It also writes the metadata-only
+`meta/audio-transcription-estimate.json` report for the two approved audio
+works (currently 33 planned transcription chunks) before any upload. It also regenerates
 `private-input/ocr-results/manual-review/manual-review-manifest.json` and its
 contact sheets. Low-confidence OCR is not accepted by metadata alone: each
 manifest page must receive an explicit review decision before the acceptance
