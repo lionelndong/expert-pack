@@ -76,6 +76,36 @@ def test_integrate_ocr_updates_inventory_and_copies_nonblank_atom(tmp_path):
     assert (tmp_path / "pack" / "ocr" / "src-example-page-0004.md").is_file()
 
 
+def test_integrate_ocr_marks_inventory_complete_after_manual_review(tmp_path):
+    ocr_root = tmp_path / "ocr-results"
+    (ocr_root / "atoms").mkdir(parents=True)
+    (ocr_root / "reports").mkdir(parents=True)
+    (ocr_root / "manual-review").mkdir(parents=True)
+    atom = OCR.atom_markdown(
+        title="Offers — OCR page 4",
+        source_id="src-example",
+        pdf=Path("offers.pdf"),
+        relative_path="Books/offers.pdf",
+        page=4,
+        text="Offer value",
+        mean_confidence=91.0,
+        min_confidence=80.0,
+        word_count=2,
+    )
+    (ocr_root / "atoms" / "src-example-page-0004.md").write_text(atom, encoding="utf-8")
+    (ocr_root / "reports" / "src-example.json").write_text(
+        '{"source_id":"src-example","pages_requested":[4],"pages_completed":1,"low_confidence_pages":[4],"results":[{"source_id":"src-example","page":4,"classification":"low_confidence_manual_review","manual_review_required":true}]}',
+        encoding="utf-8",
+    )
+    (ocr_root / "manual-review" / "manual-review-manifest.json").write_text(
+        '{"visual_qa_status":"manual_review_complete","page_count":1,"reviewed_count":1,"pending_count":0,"decision_counts":{"accept_ocr":1,"graphic_or_blank":0,"reocr_required":0,"unreadable":0}}',
+        encoding="utf-8",
+    )
+    ledger = [{"kind": "inventory_record", "record_id": "src-example", "ocr_required_pages": [4], "status": "indexed_text_layer_ocr_pending"}]
+    BUILDER.integrate_ocr(tmp_path / "pack", ocr_root, ledger)
+    assert ledger[0]["status"] == "indexed_ocr_recovered_manual_visual_qa_complete"
+
+
 def test_make_ledger_preserves_evidence_duplicate_canonical():
     manifest = {
         "sources": [

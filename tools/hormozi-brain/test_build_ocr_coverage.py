@@ -44,3 +44,39 @@ def test_integrate_ocr_promotes_canonical_coverage_after_review(tmp_path):
     assert result["visual_qa_status"] == "manual_review_complete"
     assert result["manual_review_pages"] == 1
     assert (tmp_path / "pack" / "ocr" / "src-test-page-0001.md").is_file()
+
+
+def test_coverage_categories_are_explicit_and_do_not_hide_pending_sources(tmp_path):
+    meta = tmp_path / "meta"
+    meta.mkdir()
+    (tmp_path / "present.md").write_text("present", encoding="utf-8")
+    (meta / "official-channel-catalog.json").write_text(json.dumps({
+        "channels": [{"videos": [{
+            "video_id": "captionless1",
+            "title": "Captionless",
+            "channel_url": "https://www.youtube.com/@AlexHormozi",
+            "status": "caption_unavailable_pending_openai_transcription",
+        }]}],
+    }), encoding="utf-8")
+    ledger = [
+        {"kind": "inventory_record", "record_id": "included", "status": "indexed_evidence", "absolute_path": str(tmp_path / "present.md")},
+        {"kind": "inventory_record", "record_id": "duplicate", "status": "duplicate_by_sha256", "absolute_path": str(tmp_path / "present.md")},
+        {"kind": "inventory_record", "record_id": "incomplete", "status": "approved_but_format_pending", "absolute_path": str(tmp_path / "present.md")},
+        {"kind": "inventory_record", "record_id": "unsupported", "status": "excluded_by_rights_or_scope", "absolute_path": str(tmp_path / "present.md")},
+        {"kind": "inventory_record", "record_id": "quarantine", "status": "quarantined_restricted_authorization_required", "absolute_path": str(tmp_path / "present.md")},
+        {"kind": "inventory_record", "record_id": "missing", "status": "indexed_evidence", "absolute_path": str(tmp_path / "absent.md")},
+    ]
+    report = BUILD.coverage_categories(tmp_path, ledger, {
+        "audio": [{"path": "audio.mp3", "status": "metadata_ready_pending_transcription"}],
+    })
+    assert report["categories"] == {
+        "included": 2,
+        "duplicate": 1,
+        "incomplete": 1,
+        "unsupported": 1,
+        "quarantined": 1,
+        "missing": 1,
+    }
+    assert len(report["missing"]["official_captionless_videos"]) == 1
+    assert len(report["missing"]["audio_pending_transcription"]) == 1
+    assert report["missing"]["inventory_records"][0]["record_id"] == "missing"

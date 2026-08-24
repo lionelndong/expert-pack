@@ -647,7 +647,11 @@ def integrate_ocr(output: Path, ocr_root: Path, ledger: list[dict[str, object]])
             row["ocr_recovered_pages"] = recovered
             row["ocr_manual_visual_review"] = True
             if recovered == expected:
-                row["status"] = "indexed_ocr_recovered_pending_manual_visual_qa"
+                row["status"] = (
+                    "indexed_ocr_recovered_manual_visual_qa_complete"
+                    if result.get("visual_qa_status") == "manual_review_complete"
+                    else "indexed_ocr_recovered_pending_manual_visual_qa"
+                )
             else:
                 row["status"] = "indexed_ocr_partial_pending"
     return result
@@ -730,6 +734,85 @@ def copy_skills(output: Path) -> dict[str, object]:
     return result
 
 
+def coverage_category(status: str) -> str:
+    """Map implementation statuses to the six operator-facing coverage buckets."""
+
+    if status == "duplicate_by_sha256":
+        return "duplicate"
+    if status.startswith("quarantined_"):
+        return "quarantined"
+    if status in {"excluded_by_rights_or_scope", "unsupported_type_reported"} or "unsupported" in status:
+        return "unsupported"
+    if (
+        "pending" in status
+        or status in {"approved_but_format_pending", "pending_rights_or_quality_review", "indexed_ocr_partial_pending"}
+    ):
+        return "incomplete"
+    if status.startswith(("included_", "indexed_", "inspected_")) or status == "ocr_true_blank_page":
+        return "included"
+    return "missing"
+
+
+def coverage_categories(output: Path, ledger: list[dict[str, object]], extras: dict[str, object]) -> dict[str, object]:
+    """Build explicit coverage buckets without treating pending external work as included."""
+
+    category_counts = Counter(coverage_category(str(row.get("status", ""))) for row in ledger)
+    missing_inventory = [
+        {
+            "record_id": str(row.get("record_id")),
+            "title": str(row.get("title") or row.get("relative_path") or row.get("record_id")),
+            "relative_path": row.get("relative_path"),
+            "status": row.get("status"),
+        }
+        for row in ledger
+        if row.get("kind") == "inventory_record"
+        and row.get("absolute_path")
+        and not Path(str(row.get("absolute_path"))).is_file()
+    ]
+    catalog_missing: list[dict[str, object]] = []
+    catalog_path = output / "meta" / "official-channel-catalog.json"
+    if catalog_path.is_file():
+        try:
+            catalog = json.loads(catalog_path.read_text(encoding="utf-8"))
+            catalog_missing = [
+                {
+                    "video_id": video.get("video_id"),
+                    "title": video.get("title"),
+                    "channel_url": video.get("channel_url"),
+                    "status": video.get("status"),
+                }
+                for channel in catalog.get("channels", [])
+                for video in channel.get("videos", [])
+                if video.get("status") == "caption_unavailable_pending_openai_transcription"
+            ]
+        except (OSError, json.JSONDecodeError, TypeError):
+            catalog_missing = []
+    pending_audio = [
+        {"path": row.get("path"), "status": row.get("status")}
+        for row in extras.get("audio", [])
+        if row.get("status") == "metadata_ready_pending_transcription"
+    ]
+    return {
+        "categories": {
+            "included": int(category_counts.get("included", 0)),
+            "duplicate": int(category_counts.get("duplicate", 0)),
+            "incomplete": int(category_counts.get("incomplete", 0)),
+            "unsupported": int(category_counts.get("unsupported", 0)),
+            "quarantined": int(category_counts.get("quarantined", 0)),
+            "missing": len(missing_inventory),
+        },
+        "missing": {
+            "inventory_records": missing_inventory,
+            "official_captionless_videos": catalog_missing,
+            "audio_pending_transcription": pending_audio,
+        },
+        "notes": [
+            "Category counts are over canonical ledger records; duplicate records remain counted and linked to their winner.",
+            "Official captionless videos and audio pending transcription are listed as missing external enrichments, not silently counted as included.",
+        ],
+    }
+
+
 def write_pack(output: Path, ledger: list[dict[str, object]], transcript_report: dict[str, object], skill_report: dict[str, object], counts: dict[str, int], extras: dict[str, object]) -> None:
     inventory_count = sum(row.get("kind") == "inventory_record" for row in ledger)
     included_count = sum(
@@ -764,13 +847,16 @@ def write_pack(output: Path, ledger: list[dict[str, object]], transcript_report:
         index_path.write_text(f"# {directory.replace('-', ' ').title()}\n\nGenerated navigation index for the private Hormozi brain.\n", encoding="utf-8", newline="\n")
     meta = output / "meta"
     meta.mkdir(parents=True, exist_ok=True)
-    report = {"report_version": "1.0", "generated_at": "2026-08-23", "inventory_records": inventory_count, "derived_records": len(ledger) - inventory_count, "summary": dict(Counter(str(row.get("status")) for row in ledger)), "transcripts": transcript_report, "skills": skill_report, "extras": extras, "records": ledger}
+    category_report = coverage_categories(output, ledger, extras)
+    report = {"report_version": "1.1", "generated_at": "2026-08-23", "inventory_records": inventory_count, "derived_records": len(ledger) - inventory_count, "summary": dict(Counter(str(row.get("status")) for row in ledger)), "coverage_categories": category_report, "transcripts": transcript_report, "skills": skill_report, "extras": extras, "records": ledger}
     (meta / "brain-coverage.json").write_text(json.dumps(report, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     if extras.get("containers"):
         (meta / "container-inspection.json").write_text(json.dumps(extras["containers"], indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     status_lines = ["# Brain coverage report", "", f"Inventory records: {inventory_count}", f"Derived records: {len(ledger) - inventory_count}", "", "## Status counts", "", "| Status | Count |", "|---|---:|"]
     status_lines += [f"| `{name}` | {count} |" for name, count in sorted(report["summary"].items())]
-    status_lines += ["", "## Explicit pending items", "", "- The two `LEAKED_Pricing_Playbook.pdf` records remain quarantined pending documented authorization.", "- OCR, audio transcription, and official-channel enumeration are never silently treated as complete.", "- Every inventory record has a status and duplicate relationship where a SHA-256 is available."]
+    status_lines += ["", "## Coverage categories", "", "| Category | Count |", "|---|---:|"]
+    status_lines += [f"| `{name}` | {count} |" for name, count in category_report["categories"].items()]
+    status_lines += ["", "## Explicit pending items", "", "- The two `LEAKED_Pricing_Playbook.pdf` records remain quarantined pending documented authorization.", f"- Official videos without captions pending approved transcription: {len(category_report['missing']['official_captionless_videos'])}.", f"- Audio works pending approved transcription: {len(category_report['missing']['audio_pending_transcription'])}.", f"- Inventory records whose local source file is missing: {len(category_report['missing']['inventory_records'])}.", "- OCR and official-channel enumeration are never silently treated as complete.", "- Every inventory record has a status and duplicate relationship where a SHA-256 is available."]
     coverage_body = "\n".join(status_lines) + "\n"
     coverage_fm = {"title": "Brain coverage report", "type": "meta", "pack": "alex-hormozi-brain", "tags": ["coverage", "provenance"], "schema_version": "4.1", "id": "alex-hormozi-brain/meta/source-coverage", "content_hash": sha256_text(coverage_body), "retrieval_strategy": "on_demand", "verified_at": "2026-08-23", "verified_by": "brain-builder", "confidence": "crawled"}
     (meta / "source-coverage.md").write_text("---\n" + yaml.safe_dump(coverage_fm, sort_keys=False, allow_unicode=True).strip() + "\n---\n" + coverage_body, encoding="utf-8", newline="\n")
