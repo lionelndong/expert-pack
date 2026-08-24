@@ -25,6 +25,8 @@ def main() -> int:
     quality = json.loads((pack / "meta/quality-report.json").read_text(encoding="utf-8"))
     estimate = json.loads((pack / "meta/embedding-estimate.json").read_text(encoding="utf-8"))
     catalog = json.loads((pack / "meta/official-channel-catalog.json").read_text(encoding="utf-8"))
+    container_path = pack / "meta/container-inspection.json"
+    containers = json.loads(container_path.read_text(encoding="utf-8")) if container_path.is_file() else {}
     readiness_path = pack / "meta/company-deployment-readiness.json"
     readiness = json.loads(readiness_path.read_text(encoding="utf-8")) if readiness_path.is_file() else {}
     skill_validation_path = pack / "meta/skill-validation.json"
@@ -45,6 +47,13 @@ def main() -> int:
         "official_channel_coverage": check("pass" if len(catalog_videos) == 517 and set(catalog_statuses) <= {"already_present", "caption_ingested", "caption_unavailable_pending_openai_transcription"} else "fail", f"{len(catalog_videos)} catalog videos; statuses={catalog_statuses}"),
         "paperclip_skills": check("pass" if len(packages) == 24 and not missing_skills and not coverage.get("skills", {}).get("invalid") and skill_validation.get("overall_status") == "pass" else "fail", f"{len(packages)} packages; structural={not missing_skills}; workflow_validation={skill_validation.get('overall_status', 'missing')}"),
         "ocr_pages": check("pass" if ocr.get("requested_pages") == 442 and ocr.get("recovered_pages") == 442 else "pending", f"{ocr.get('recovered_pages', 0)}/{ocr.get('requested_pages', 0)} pages recovered; visual QA={ocr.get('visual_qa_status')}"),
+        "container_formats": check(
+            "pass" if containers.get("source_count") == 3 and not containers.get("unique_knowledge_ingested") and all(
+                row.get("status") in {"inspected_metadata_manifest_no_unique_knowledge", "inspected_container_manifest_no_unique_knowledge"}
+                for row in containers.get("sources", [])
+            ) else "fail",
+            f"{containers.get('source_count', 0)} CSV/ZIP records inspected; unique knowledge ingested={containers.get('unique_knowledge_ingested', True)}",
+        ),
         "restricted_sources": check("pending_external_authorization" if len(restricted) == 2 else "fail", f"{len(restricted)} restricted records remain quarantined"),
         "audio": check("pending_external_api" if any(row.get("status") == "metadata_ready_pending_transcription" for row in coverage.get("extras", {}).get("audio", [])) else "pass", "Timestamped audio transcription requires OPENAI_API_KEY"),
         "embeddings": check("pending_external_api" if not os.environ.get("OPENAI_API_KEY") else "ready_to_run", f"{estimate.get('estimated_input_tokens')} estimated tokens; projected=${estimate.get('projected_embedding_cost_usd')}; local_model={estimate.get('local_model')}"),

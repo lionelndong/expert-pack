@@ -89,3 +89,14 @@ Use the inventory and rights decision tools before building. The builder only
 extracts records explicitly marked `approved_internal`; it never extracts
 quarantined material. See `tools/source-intake/README.md` and
 `tools/private-pack-builder/README.md` for the exact commands.
+
+For a full rebuild followed by regenerated validation artifacts, use:
+
+```powershell
+.\scripts\rebuild-hormozi-brain.ps1
+```
+
+This runs the pack builder, Paperclip skill validation, embedding-cost estimate,
+offline retrieval benchmark, company preflight, and final acceptance audit. It
+does not call the OpenAI API; embeddings and audio remain explicitly pending
+until the approved API key is injected.

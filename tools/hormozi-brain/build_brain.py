@@ -9,6 +9,7 @@ skills, and writes a coverage ledger with explicit pending statuses.
 from __future__ import annotations
 
 import argparse
+import csv
 from collections import Counter, defaultdict
 import hashlib
 import html
@@ -310,6 +311,79 @@ def extract_epub(path: Path, output: Path, ledger: list[dict[str, object]]) -> d
     return result
 
 
+def inspect_containers(manifest: dict[str, object]) -> dict[str, object]:
+    """Inspect approved CSV/ZIP containers without ingesting duplicate raw content."""
+    sources = list(manifest.get("sources", [])) + list(manifest.get("quarantined_sources", []))
+    report_rows: list[dict[str, object]] = []
+    csv_rows: list[tuple[str, list[dict[str, str]], list[str]]] = []
+    for source in sources:
+        source_type = str(source.get("type", ""))
+        path = Path(str(source.get("path", "")))
+        if source_type == "csv" and path.is_file():
+            with path.open("r", encoding="utf-8-sig", errors="replace", newline="") as handle:
+                reader = csv.DictReader(handle)
+                rows = [{str(key): str(value or "").strip() for key, value in row.items()} for row in reader]
+                fieldnames = [str(value) for value in (reader.fieldnames or [])]
+            csv_rows.append((str(source["source_id"]), rows, fieldnames))
+            report_rows.append({
+                "source_id": str(source["source_id"]),
+                "type": source_type,
+                "source_hash": source.get("hash"),
+                "path": source.get("relative_path"),
+                "status": "inspected_metadata_manifest_no_unique_knowledge",
+                "row_count": len(rows),
+                "fieldnames": fieldnames,
+                "unique_knowledge_ingested": False,
+                "reason": "CSV contains library metadata already represented by the canonical inventory and derived pack records.",
+            })
+        elif source_type == "archive" and path.is_file():
+            with zipfile.ZipFile(path) as archive:
+                members = [item for item in archive.infolist() if not item.is_dir()]
+            manifest_matches = 0
+            unmatched: list[str] = []
+            for member in members:
+                member_name = str(member.filename).replace("\\", "/")
+                matched = any(
+                    int(row.get("size_bytes", -1)) == member.file_size
+                    and (
+                        str(row.get("relative_path", "")).replace("\\", "/").endswith(member_name)
+                        or Path(str(row.get("relative_path", ""))).name == Path(member_name).name
+                    )
+                    for row in sources
+                )
+                if matched:
+                    manifest_matches += 1
+                else:
+                    unmatched.append(member_name)
+            status = "inspected_container_manifest_no_unique_knowledge" if not unmatched else "inspected_container_unmatched_members"
+            report_rows.append({
+                "source_id": str(source["source_id"]),
+                "type": source_type,
+                "source_hash": source.get("hash"),
+                "path": source.get("relative_path"),
+                "status": status,
+                "member_count": len(members),
+                "manifest_member_matches": manifest_matches,
+                "unmatched_members": unmatched,
+                "unique_knowledge_ingested": bool(unmatched),
+                "reason": "ZIP members were inspected as a container manifest; matching members are already represented by inventoried sources.",
+            })
+    normalized_groups: dict[str, list[str]] = defaultdict(list)
+    for source_id, rows, fieldnames in csv_rows:
+        normalized = json.dumps(sorted(rows, key=lambda row: json.dumps(row, sort_keys=True)), ensure_ascii=False, sort_keys=True)
+        normalized_groups[hashlib.sha256(normalized.encode("utf-8")).hexdigest()].append(source_id)
+    for row in report_rows:
+        if row["type"] == "csv":
+            source_id = str(row["source_id"])
+            row["duplicate_group"] = next((group for group in normalized_groups.values() if source_id in group), [source_id])
+    return {
+        "status": "complete",
+        "source_count": len(report_rows),
+        "sources": report_rows,
+        "unique_knowledge_ingested": any(bool(row.get("unique_knowledge_ingested")) for row in report_rows),
+    }
+
+
 def audio_metadata(path: Path, output: Path, ledger: list[dict[str, object]]) -> dict[str, object]:
     target = output / "audio"
     target.mkdir(parents=True, exist_ok=True)
@@ -334,9 +408,10 @@ def audio_metadata(path: Path, output: Path, ledger: list[dict[str, object]]) ->
     return result
 
 
-def make_ledger(manifest: dict, evidence: dict, skill_report: dict) -> list[dict[str, object]]:
+def make_ledger(manifest: dict, evidence: dict, skill_report: dict, container_report: dict | None = None) -> list[dict[str, object]]:
     evidence_by_id = {str(row["source_id"]): row for row in evidence.get("sources", [])}
     skills_by_id = {str(row["source_id"]): row for row in skill_report.get("sources", [])}
+    containers_by_id = {str(row["source_id"]): row for row in (container_report or {}).get("sources", [])}
     records: list[dict[str, object]] = []
     for group in ("sources", "quarantined_sources", "unreadable_sources"):
         for source in manifest.get(group, []):
@@ -351,11 +426,19 @@ def make_ledger(manifest: dict, evidence: dict, skill_report: dict) -> list[dict
                 status = "indexed_curated_skill_source"
             elif evidence_row.get("action") == "unsupported_type_reported":
                 status = "approved_but_format_pending"
+            elif evidence_row.get("action") == "deduplicated_by_source_hash":
+                status = "duplicate_by_sha256"
             elif evidence_row.get("action") == "excluded_by_rights_decision":
                 status = "excluded_by_rights_or_scope"
             else:
                 status = "pending_rights_or_quality_review"
-            records.append({
+            container_row = containers_by_id.get(source_id)
+            if container_row and container_row.get("status") in {
+                "inspected_metadata_manifest_no_unique_knowledge",
+                "inspected_container_manifest_no_unique_knowledge",
+            }:
+                status = str(container_row["status"])
+            record = {
                 "record_id": source_id,
                 "kind": "inventory_record",
                 "relative_path": source.get("relative_path"),
@@ -369,16 +452,56 @@ def make_ledger(manifest: dict, evidence: dict, skill_report: dict) -> list[dict
                 "skills_action": skill_row.get("action"),
                 "ocr_required_pages": evidence_row.get("ocr_required_pages", []),
                 "pack_membership": [name for name, row in (("evidence", evidence_row), ("curated-skills", skill_row)) if row.get("action") in {"extracted", "extracted_with_ocr_required_pages"}],
-            })
+            }
+            if container_row:
+                record["container_inspection"] = container_row["status"]
+            if evidence_row.get("action") == "deduplicated_by_source_hash" and evidence_row.get("duplicate_of"):
+                record["duplicate_of"] = str(evidence_row["duplicate_of"])
+            records.append(record)
     groups: dict[str, list[dict[str, object]]] = defaultdict(list)
     for record in records:
         if record.get("sha256"):
             groups[str(record["sha256"])].append(record)
+
+    def canonical_id(record_id: str, by_id: dict[str, dict[str, object]]) -> str:
+        """Follow evidence-level duplicate links to the terminal source."""
+        seen: set[str] = set()
+        current = record_id
+        while current in by_id and current not in seen and by_id[current].get("duplicate_of"):
+            seen.add(current)
+            current = str(by_id[current]["duplicate_of"])
+        return current
+
+    status_priority = {
+        "indexed_ocr_recovered_pending_manual_visual_qa": 0,
+        "indexed_evidence": 0,
+        "indexed_curated_skill_source": 0,
+        "approved_but_format_pending": 2,
+        "pending_rights_or_quality_review": 3,
+        "excluded_by_rights_or_scope": 4,
+        "quarantined_restricted_authorization_required": 5,
+    }
+    by_id = {str(record["record_id"]): record for record in records}
     for group in groups.values():
-        group.sort(key=lambda item: str(item["record_id"]))
-        for duplicate in group[1:]:
-            duplicate["duplicate_of"] = group[0]["record_id"]
-            duplicate["status"] = "duplicate_by_sha256"
+        explicit_targets = {
+            canonical_id(str(record["duplicate_of"]), by_id)
+            for record in group
+            if record.get("duplicate_of") and str(record["duplicate_of"]) in by_id
+        }
+        if explicit_targets:
+            winner_id = min(explicit_targets)
+        else:
+            winner_id = min(
+                (str(record["record_id"]) for record in group),
+                key=lambda record_id: (status_priority.get(str(by_id[record_id].get("status")), 9), record_id),
+            )
+        for record in group:
+            record_id = str(record["record_id"])
+            if record_id == winner_id:
+                record.pop("duplicate_of", None)
+                continue
+            record["duplicate_of"] = winner_id
+            record["status"] = "duplicate_by_sha256"
     return records
 
 
@@ -598,6 +721,8 @@ def write_pack(output: Path, ledger: list[dict[str, object]], transcript_report:
     meta.mkdir(parents=True, exist_ok=True)
     report = {"report_version": "1.0", "generated_at": "2026-08-23", "inventory_records": inventory_count, "derived_records": len(ledger) - inventory_count, "summary": dict(Counter(str(row.get("status")) for row in ledger)), "transcripts": transcript_report, "skills": skill_report, "extras": extras, "records": ledger}
     (meta / "brain-coverage.json").write_text(json.dumps(report, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    if extras.get("containers"):
+        (meta / "container-inspection.json").write_text(json.dumps(extras["containers"], indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     status_lines = ["# Brain coverage report", "", f"Inventory records: {inventory_count}", f"Derived records: {len(ledger) - inventory_count}", "", "## Status counts", "", "| Status | Count |", "|---|---:|"]
     status_lines += [f"| `{name}` | {count} |" for name, count in sorted(report["summary"].items())]
     status_lines += ["", "## Explicit pending items", "", "- The two `LEAKED_Pricing_Playbook.pdf` records remain quarantined pending documented authorization.", "- OCR, audio transcription, and official-channel enumeration are never silently treated as complete.", "- Every inventory record has a status and duplicate relationship where a SHA-256 is available."]
@@ -644,12 +769,13 @@ def main() -> int:
     manifest = json.loads(args.manifest.read_text(encoding="utf-8"))
     evidence = json.loads(args.evidence_report.read_text(encoding="utf-8"))
     skill_sources = json.loads(args.skills_report.read_text(encoding="utf-8"))
-    ledger = make_ledger(manifest, evidence, skill_sources)
+    container_report = inspect_containers(manifest)
+    ledger = make_ledger(manifest, evidence, skill_sources, container_report)
     counts = {"evidence": copy_md(ROOT / "private-input/packs/alex-hormozi-evidence-v4/concepts", output / "evidence"), "curated-skills": copy_md(ROOT / "private-input/packs/alex-hormozi-skills-v2/concepts", output / "curated-skills")}
     transcript_report = build_transcripts(output, ledger)
     merge_preserved_official(output, preserved, ledger, transcript_report)
     skill_report = copy_skills(output)
-    extras: dict[str, object] = {"ebook": [], "audio": [], "ocr": integrate_ocr(output, args.ocr_results, ledger)}
+    extras: dict[str, object] = {"ebook": [], "audio": [], "containers": container_report, "ocr": integrate_ocr(output, args.ocr_results, ledger)}
     seen_hashes: set[str] = set()
     for source in manifest.get("sources", []):
         path = Path(str(source.get("path", "")))
@@ -664,6 +790,13 @@ def main() -> int:
                 extras["ebook"].append(extract_epub(path, output, ledger))
             elif not args.no_audio_metadata:
                 extras["audio"].append(audio_metadata(path, output, ledger))
+    for ebook_result in extras["ebook"]:
+        if ebook_result.get("status") != "included_extracted":
+            continue
+        for record in ledger:
+            if record.get("kind") == "inventory_record" and record.get("absolute_path") == ebook_result.get("path"):
+                record["status"] = "included_extracted"
+                record["pack_membership"] = sorted(set(record.get("pack_membership", [])) | {"ebook"})
     write_pack(output, ledger, transcript_report, skill_report, counts, extras)
     if preserved is not None:
         # The preservation staging directory contains private transcript text;

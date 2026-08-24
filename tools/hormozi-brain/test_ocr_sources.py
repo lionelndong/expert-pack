@@ -1,6 +1,7 @@
+import csv
 import importlib.util
+import zipfile
 from pathlib import Path
-
 
 MODULE_PATH = Path(__file__).with_name("ocr_sources.py")
 SPEC = importlib.util.spec_from_file_location("hormozi_ocr_sources", MODULE_PATH)
@@ -73,3 +74,47 @@ def test_integrate_ocr_updates_inventory_and_copies_nonblank_atom(tmp_path):
     assert result["recovered_pages"] == 1
     assert ledger[0]["status"] == "indexed_ocr_recovered_pending_manual_visual_qa"
     assert (tmp_path / "pack" / "ocr" / "src-example-page-0004.md").is_file()
+
+
+def test_make_ledger_preserves_evidence_duplicate_canonical():
+    manifest = {
+        "sources": [
+            {"source_id": "src-canonical", "relative_path": "canonical.pdf", "type": "pdf", "hash": "sha256:same", "rights_status": "pending_rights_review", "use_scope": "inventory_only"},
+            {"source_id": "src-copy", "relative_path": "copy.pdf", "type": "pdf", "hash": "sha256:same", "rights_status": "pending_rights_review", "use_scope": "inventory_only"},
+        ]
+    }
+    evidence = {
+        "sources": [
+            {"source_id": "src-canonical", "action": "extracted", "ocr_required_pages": []},
+            {"source_id": "src-copy", "action": "deduplicated_by_source_hash", "duplicate_of": "src-canonical"},
+        ]
+    }
+    ledger = BUILDER.make_ledger(manifest, evidence, {"sources": []})
+    records = {row["record_id"]: row for row in ledger}
+    assert records["src-canonical"]["status"] == "indexed_evidence"
+    assert records["src-copy"]["status"] == "duplicate_by_sha256"
+    assert records["src-copy"]["duplicate_of"] == "src-canonical"
+
+
+def test_inspect_containers_resolves_metadata_only_csv_and_zip(tmp_path):
+    csv_path = tmp_path / "library.csv"
+    with csv_path.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.writer(handle)
+        writer.writerow(["Resource Name", "Status"])
+        writer.writerow(["Offers", "Organized"])
+    zip_path = tmp_path / "library.zip"
+    with zipfile.ZipFile(zip_path, "w") as archive:
+        archive.writestr("Private & Shared/Offers.md", "already represented")
+    manifest = {
+        "sources": [
+            {"source_id": "src-csv", "type": "csv", "path": str(csv_path), "relative_path": "library.csv", "hash": "sha256:csv", "size_bytes": csv_path.stat().st_size},
+            {"source_id": "src-zip", "type": "archive", "path": str(zip_path), "relative_path": "library.zip", "hash": "sha256:zip", "size_bytes": zip_path.stat().st_size},
+            {"source_id": "src-member", "type": "markdown", "relative_path": "Offers.md", "size_bytes": len("already represented")},
+        ]
+    }
+    report = BUILDER.inspect_containers(manifest)
+    rows = {row["source_id"]: row for row in report["sources"]}
+    assert rows["src-csv"]["status"] == "inspected_metadata_manifest_no_unique_knowledge"
+    assert rows["src-csv"]["unique_knowledge_ingested"] is False
+    assert rows["src-zip"]["status"] == "inspected_container_manifest_no_unique_knowledge"
+    assert rows["src-zip"]["manifest_member_matches"] == 1
