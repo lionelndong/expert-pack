@@ -11,10 +11,10 @@ from __future__ import annotations
 import argparse
 import json
 import os
-from pathlib import Path
 import subprocess
 import tempfile
 import time
+from pathlib import Path
 
 
 def duration_seconds(audio: Path) -> float:
@@ -61,7 +61,7 @@ def transcribe_chunk(client, chunk: Path, model: str, retries: int) -> dict:
                     timestamp_granularities=["segment"],
                 )
             return response_dict(response)
-        except Exception as error:  # SDK/network errors are retried without logging source text.
+        except Exception as error:  # noqa: BLE001 - SDK/network errors are retried without logging source text.
             last_error = error
             if attempt + 1 < retries:
                 time.sleep(2 ** attempt)
@@ -80,6 +80,10 @@ def main() -> int:
     args = parser.parse_args()
     if not args.audio.is_file():
         raise SystemExit(f"Audio not found: {args.audio}")
+    # Estimates may inspect duration without credentials, but an actual
+    # transcription must fail before opening or probing source media.
+    if not args.estimate_only and not os.environ.get("OPENAI_API_KEY"):
+        raise SystemExit("OPENAI_API_KEY is required; no audio was opened or uploaded")
     try:
         duration = duration_seconds(args.audio)
     except (OSError, subprocess.CalledProcessError, ValueError) as error:
@@ -103,8 +107,6 @@ def main() -> int:
         args.output.write_text(json.dumps({"status": "estimate_only", **plan}, indent=2) + "\n", encoding="utf-8")
         print(json.dumps({"status": "estimate_only", "duration_seconds": duration, "chunks": len(chunks), "output": str(args.output)}, indent=2))
         return 0
-    if not os.environ.get("OPENAI_API_KEY"):
-        raise SystemExit("OPENAI_API_KEY is required; no audio was opened or uploaded")
     try:
         from openai import OpenAI
     except ImportError as error:

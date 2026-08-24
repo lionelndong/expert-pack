@@ -1,10 +1,9 @@
 import importlib.util
 import json
-from pathlib import Path
 import sys
+from pathlib import Path
 
 import pytest
-
 
 MODULE_PATH = Path(__file__).with_name("transcribe_audio.py")
 SPEC = importlib.util.spec_from_file_location("hormozi_transcribe_audio", MODULE_PATH)
@@ -25,10 +24,18 @@ def test_missing_key_fails_before_upload(tmp_path, monkeypatch):
     audio = tmp_path / "dummy.mp3"
     audio.write_bytes(b"not audio")
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-    monkeypatch.setattr(AUDIO, "duration_seconds", lambda _: 1.0)
+    probed = False
+
+    def fail_if_probed(_audio):
+        nonlocal probed
+        probed = True
+        raise AssertionError("duration must not be inspected without an API key")
+
+    monkeypatch.setattr(AUDIO, "duration_seconds", fail_if_probed)
     monkeypatch.setattr(sys, "argv", ["transcribe_audio.py", "--audio", str(audio), "--output", str(tmp_path / "out.json")])
     with pytest.raises(SystemExit, match="OPENAI_API_KEY"):
         AUDIO.main()
+    assert probed is False
 
 
 def test_estimate_only_reports_usage_without_key(tmp_path, monkeypatch):
