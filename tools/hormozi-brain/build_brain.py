@@ -37,6 +37,9 @@ DEFAULT_RESTRICTED_RESOLUTION = ROOT / "private-input/restricted-processing/rest
 VIDEO_HEADER = re.compile(r"^(.+?)\s+-\s+YouTube\s*$", re.IGNORECASE)
 VIDEO_URL = re.compile(r"https?://(?:www\.)?youtube\.com/watch\?v=[^\s]+", re.IGNORECASE)
 TIMESTAMP = re.compile(r"^\((\d{1,2}):(\d{2})(?::(\d{2}))?\)\s*(.*)$")
+# Keep all generated provenance metadata internally consistent while making the
+# freshness date reflect the actual build rather than a stale fixture date.
+BUILD_DATE = datetime.now(timezone.utc).date().isoformat()
 
 
 def sha256_file(path: Path) -> str:
@@ -159,7 +162,7 @@ def transcript_markdown(section: dict[str, object]) -> str:
         "schema_version": "4.1",
         "id": f"alex-hormozi-brain/youtube/{video_id}/part-{int(section.get('part_index', 1)):03d}",
         "content_hash": sha256_text(body),
-        "verified_at": "2026-08-23",
+        "verified_at": BUILD_DATE,
         "verified_by": "transcript-normalizer",
         "confidence": "crawled",
         "retrieval_strategy": "standard",
@@ -325,7 +328,7 @@ def extract_epub(path: Path, output: Path, ledger: list[dict[str, object]]) -> d
                 for index, (name, text) in enumerate(sections, start=1):
                     body = f"# $100M Money Models — EPUB chapter {index}\n\n## EPUB path\n\n`{name}`\n\n{text}\n"
                     path_out = target / f"100m-money-models-chapter-{index:03d}.md"
-                    fm = {"title": f"$100M Money Models — EPUB chapter {index}", "type": "reference", "pack": "alex-hormozi-brain", "tags": ["ebook", "money-models", "chapter"], "schema_version": "4.1", "id": f"alex-hormozi-brain/ebook/100m-money-models/chapter-{index:03d}", "content_hash": sha256_text(body), "retrieval_strategy": "standard", "verified_at": "2026-08-23", "confidence": "crawled", "verified_by": "epub-extractor"}
+                    fm = {"title": f"$100M Money Models — EPUB chapter {index}", "type": "reference", "pack": "alex-hormozi-brain", "tags": ["ebook", "money-models", "chapter"], "schema_version": "4.1", "id": f"alex-hormozi-brain/ebook/100m-money-models/chapter-{index:03d}", "content_hash": sha256_text(body), "retrieval_strategy": "standard", "verified_at": BUILD_DATE, "confidence": "crawled", "verified_by": "epub-extractor"}
                     path_out.write_text("---\n" + yaml.safe_dump(fm, sort_keys=False, allow_unicode=True).strip() + "\n---\n" + body, encoding="utf-8", newline="\n")
                     outputs.append(str(path_out))
                 result.update(status="included_extracted", chapters=len(sections), output=outputs)
@@ -484,7 +487,7 @@ def audio_transcript_markdown(source: dict[str, object], payload: dict[str, obje
         "schema_version": "4.1",
         "id": f"alex-hormozi-brain/audio/{slug(title)}/transcript",
         "content_hash": sha256_text(body),
-        "verified_at": "2026-08-23",
+        "verified_at": BUILD_DATE,
         "verified_by": "openai-audio-transcriber",
         "confidence": "transcribed",
         "retrieval_strategy": "standard",
@@ -1127,7 +1130,7 @@ def copy_skills(output: Path) -> dict[str, object]:
             "schema_version": "4.1",
             "id": f"alex-hormozi-brain/agent-skills/{package.name}",
             "content_hash": sha256_text(atom_body),
-            "verified_at": "2026-08-23",
+            "verified_at": BUILD_DATE,
             "verified_by": "paperclip-skill-normalizer",
             "confidence": "crawled",
             "related": ["overview.md"],
@@ -1242,9 +1245,9 @@ def write_pack(output: Path, ledger: list[dict[str, object]], transcript_report:
         "description": "Private provenance-first composite pack combining approved evidence, structured YouTube transcripts, and executable Paperclip skills.",
         "entry_point": "overview.md",
         "author": "Alex Hormozi Brain project",
-        "created": "2026-08-23",
-        "updated": "2026-08-23",
-        "freshness": {"refresh_cycle": "P30D", "last_full_review": "2026-08-23", "verified_file_count": included_count, "total_file_count": inventory_count, "coverage_pct": round(included_count / inventory_count * 100, 2) if inventory_count else 0},
+        "created": BUILD_DATE,
+        "updated": BUILD_DATE,
+        "freshness": {"refresh_cycle": "P30D", "last_full_review": BUILD_DATE, "verified_file_count": included_count, "total_file_count": inventory_count, "coverage_pct": round(included_count / inventory_count * 100, 2) if inventory_count else 0},
         "authority_boundary": {"in_scope": "Evidence-backed frameworks and decision patterns represented by retrieved approved or public source records.", "out_of_scope": ["Claims without a supporting atom", "Current personal opinions, endorsements, or authorization by Alex Hormozi", "Quarantined, unauthorized, excluded, or unresolved sources", "Legal, tax, investment, medical, or regulated advice"], "refuse_when": ["No supporting source exists", "Source rights or provenance are unresolved"], "no_source_no_claim": True},
         "context": {"always": ["overview.md", "STATUS.md"], "searchable": ["evidence/", "curated-skills/", "youtube/", "ebook/", "audio/", "ocr/", "agent-skills/"], "on_demand": ["meta/"]},
     }
@@ -1257,7 +1260,7 @@ def write_pack(output: Path, ledger: list[dict[str, object]], transcript_report:
     meta = output / "meta"
     meta.mkdir(parents=True, exist_ok=True)
     category_report = coverage_categories(output, ledger, extras)
-    report = {"report_version": "1.1", "generated_at": "2026-08-23", "inventory_records": inventory_count, "derived_records": len(ledger) - inventory_count, "summary": dict(Counter(str(row.get("status")) for row in ledger)), "coverage_categories": category_report, "transcripts": transcript_report, "skills": skill_report, "extras": extras, "records": ledger}
+    report = {"report_version": "1.1", "generated_at": BUILD_DATE, "inventory_records": inventory_count, "derived_records": len(ledger) - inventory_count, "summary": dict(Counter(str(row.get("status")) for row in ledger)), "coverage_categories": category_report, "transcripts": transcript_report, "skills": skill_report, "extras": extras, "records": ledger}
     (meta / "brain-coverage.json").write_text(json.dumps(report, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     if extras.get("containers"):
         (meta / "container-inspection.json").write_text(json.dumps(extras["containers"], indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
@@ -1267,7 +1270,7 @@ def write_pack(output: Path, ledger: list[dict[str, object]], transcript_report:
     status_lines += [f"| `{name}` | {count} |" for name, count in category_report["categories"].items()]
     status_lines += ["", "## Ledger contract", "", "- Every inventory record carries a stable ID, title, approved-root origin, format, SHA-256 field, rights status, extraction status, pack membership, and duplicate group. Hash-unavailable records are explicit.", "", "## Explicit pending items", "", "- The two `LEAKED_Pricing_Playbook.pdf` records remain quarantined pending documented authorization.", f"- Official videos without captions pending approved transcription: {len(category_report['missing']['official_captionless_videos'])}.", f"- Audio works pending approved transcription: {len(category_report['missing']['audio_pending_transcription'])}.", f"- Inventory records whose local source file is missing: {len(category_report['missing']['inventory_records'])}.", "- OCR and official-channel enumeration are never silently treated as complete."]
     coverage_body = "\n".join(status_lines) + "\n"
-    coverage_fm = {"title": "Brain coverage report", "type": "meta", "pack": "alex-hormozi-brain", "tags": ["coverage", "provenance"], "schema_version": "4.1", "id": "alex-hormozi-brain/meta/source-coverage", "content_hash": sha256_text(coverage_body), "retrieval_strategy": "on_demand", "verified_at": "2026-08-23", "verified_by": "brain-builder", "confidence": "crawled"}
+    coverage_fm = {"title": "Brain coverage report", "type": "meta", "pack": "alex-hormozi-brain", "tags": ["coverage", "provenance"], "schema_version": "4.1", "id": "alex-hormozi-brain/meta/source-coverage", "content_hash": sha256_text(coverage_body), "retrieval_strategy": "on_demand", "verified_at": BUILD_DATE, "verified_by": "brain-builder", "confidence": "crawled"}
     (meta / "source-coverage.md").write_text("---\n" + yaml.safe_dump(coverage_fm, sort_keys=False, allow_unicode=True).strip() + "\n---\n" + coverage_body, encoding="utf-8", newline="\n")
     official_status = transcript_report.get("official_catalog_status_counts", {})
     official_line = "verified catalog present" if official_status else "pending explicit yt-dlp acquisition"
