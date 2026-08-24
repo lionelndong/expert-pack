@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Restricted Hormozi source authorization",
+  "type": "object",
+  "required": ["authorization_status", "permitted_internal_processing", "sources"],
+  "properties": {
+    "authorization_status": {"const": "authorized"},
+    "permitted_internal_processing": {"const": true},
+    "sources": {
+      "type": "array",
+      "minItems": 2,
+      "items": {
+        "type": "object",
+        "required": ["source_id", "rights_owner", "department", "obtained_via", "scope", "approver", "approved_at", "ticket"],
+        "properties": {
+          "source_id": {"type": "string"},
+          "rights_owner": {"type": "string", "minLength": 1},
+          "department": {"type": "string", "minLength": 1},
+          "obtained_via": {"type": "string", "minLength": 1},
+          "scope": {"type": "string", "minLength": 1},
+          "approver": {"type": "string", "minLength": 1},
+          "approved_at": {"type": "string", "minLength": 1},
+          "ticket": {"type": "string", "minLength": 1}
+        }
+      }
+    }
+  }
+}
