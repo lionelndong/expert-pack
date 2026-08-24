@@ -1,11 +1,10 @@
 import importlib.util
 import json
-from pathlib import Path
 import sys
 import types
+from pathlib import Path
 
 import pytest
-
 
 MODULE_PATH = Path(__file__).with_name("transcribe_official.py")
 sys.path.insert(0, str(MODULE_PATH.parent))

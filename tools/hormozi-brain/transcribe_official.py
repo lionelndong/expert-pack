@@ -12,7 +12,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import re
 import shutil
 import tempfile
 from datetime import datetime, timezone
@@ -24,7 +23,11 @@ except ImportError:  # pragma: no cover - clear CLI failure path
     YoutubeDL = None
 
 from build_brain import slug, transcript_markdown
-from transcribe_audio import duration_seconds, plan_chunks, response_dict, transcribe_chunk
+from transcribe_audio import (
+    duration_seconds,
+    plan_chunks,
+    transcribe_chunk,
+)
 
 
 def format_timestamp(seconds: float) -> str:
@@ -278,7 +281,7 @@ def main() -> int:
                     estimates.append(estimate_from_metadata(videos[video_id], metadata_cache[video_id], args.model, args.chunk_seconds, args.price_per_minute_usd))
                 else:
                     estimates.append(estimate_video(videos[video_id], args.model, args.chunk_seconds, args.price_per_minute_usd))
-            except Exception as error:
+            except Exception as error:  # noqa: BLE001 - preserve provider failures in the estimate report
                 estimates.append(unavailable_estimate(videos[video_id], args.model, args.chunk_seconds, args.price_per_minute_usd, error))
             continue
         if not os.environ.get("OPENAI_API_KEY"):

@@ -2,7 +2,6 @@ import importlib.util
 import json
 from pathlib import Path
 
-
 MODULE_PATH = Path(__file__).with_name("build_brain.py")
 SPEC = importlib.util.spec_from_file_location("hormozi_build", MODULE_PATH)
 assert SPEC and SPEC.loader

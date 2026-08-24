@@ -10,22 +10,21 @@ from __future__ import annotations
 
 import argparse
 import csv
-from collections import Counter, defaultdict
 import hashlib
 import html
 import json
 import os
-from pathlib import Path
 import re
 import shutil
 import subprocess
 import tempfile
 import zipfile
+from collections import Counter, defaultdict
 from html.parser import HTMLParser
+from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 import yaml
-
 
 ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_OUTPUT = ROOT / "private-input/packs/alex-hormozi-brain-v1"
@@ -34,8 +33,8 @@ DEFAULT_EVIDENCE = ROOT / "private-input/inventory/hormozi-evidence-build-report
 DEFAULT_SKILLS_REPORT = ROOT / "private-input/inventory/hormozi-skills-build-report-v2.json"
 DEFAULT_OCR_RESULTS = ROOT / "private-input/ocr-results"
 DEFAULT_RESTRICTED_RESOLUTION = ROOT / "private-input/restricted-processing/restricted-source-resolution.json"
-VIDEO_HEADER = re.compile(r"^(.+?)\s+-\s+YouTube\s*$", re.I)
-VIDEO_URL = re.compile(r"https?://(?:www\.)?youtube\.com/watch\?v=[^\s]+", re.I)
+VIDEO_HEADER = re.compile(r"^(.+?)\s+-\s+YouTube\s*$", re.IGNORECASE)
+VIDEO_URL = re.compile(r"https?://(?:www\.)?youtube\.com/watch\?v=[^\s]+", re.IGNORECASE)
 TIMESTAMP = re.compile(r"^\((\d{1,2}):(\d{2})(?::(\d{2}))?\)\s*(.*)$")
 
 
@@ -626,8 +625,8 @@ def integrate_ocr(output: Path, ocr_root: Path, ledger: list[dict[str, object]])
     copied_by_source: dict[str, list[dict[str, object]]] = defaultdict(list)
     for atom in atoms:
         text = atom.read_text(encoding="utf-8", errors="replace")
-        match = re.search(r"^source_id:\s*([^\n]+)", text, re.M)
-        page_match = re.search(r"^source_page:\s*(\d+)", text, re.M)
+        match = re.search(r"^source_id:\s*([^\n]+)", text, re.MULTILINE)
+        page_match = re.search(r"^source_page:\s*(\d+)", text, re.MULTILINE)
         source_id = match.group(1).strip().strip("'") if match else "unknown"
         page = int(page_match.group(1)) if page_match else None
         classification = qa_lookup.get((source_id, page), "") if page is not None else ""
@@ -792,7 +791,7 @@ def integrate_restricted(
             destination.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(atom, destination)
             text = atom.read_text(encoding="utf-8", errors="replace")
-            page_match = re.search(r"^source_page:\s*(\d+)", text, re.M)
+            page_match = re.search(r"^source_page:\s*(\d+)", text, re.MULTILINE)
             page = int(page_match.group(1)) if page_match else None
             ledger.append({
                 "record_id": f"restricted-ocr-{source_id}-page-{page:04d}" if page is not None else f"restricted-ocr-{source_id}-{atom.stem}",
@@ -824,7 +823,7 @@ def copy_skills(output: Path) -> dict[str, object]:
             result["invalid"].append(package.name)
             continue
         content = skill_file.read_text(encoding="utf-8", errors="replace")
-        if not re.search(r"^name:\s*[^\n]+", content, re.M) or not re.search(r"^description:\s*[^\n]+", content, re.M):
+        if not re.search(r"^name:\s*[^\n]+", content, re.MULTILINE) or not re.search(r"^description:\s*[^\n]+", content, re.MULTILINE):
             result["invalid"].append(package.name)
             continue
         target = mirror_destination / package.name
