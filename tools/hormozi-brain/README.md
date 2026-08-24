@@ -10,8 +10,9 @@ python tools/hormozi-brain/build_brain.py
 
 The builder accounts for all 428 inventory records, normalizes the supplied
 transcript exports into 273 unique videos and timestamp-bounded atoms, extracts
-the authorized EPUB, records audio metadata, and mirrors the 24 Paperclip
-packages under `private-input/skills/alex-hormozi/`. The two records named
+the authorized EPUB, records audio metadata (and ingests approved timestamped
+transcription JSON when present), and mirrors the 24 Paperclip packages under
+`private-input/skills/alex-hormozi/`. The two records named
 `LEAKED_Pricing_Playbook.pdf` remain quarantined until authorization is
 documented.
 
@@ -26,8 +27,15 @@ python tools/hormozi-brain/make_ocr_contact_sheet.py
 python tools/hormozi-brain/acceptance_audit.py
 python tools/hormozi-brain/validate_skills.py
 python tools/hormozi-brain/transcribe_audio.py --audio <approved-audio> --output private-input/audio-estimates/plan.json --estimate-only
-python tools/hormozi-brain/transcribe_audio.py --audio <approved-audio> --output private-input/transcripts/audio.json
+python tools/hormozi-brain/transcribe_audio.py --audio <approved-audio> --output private-input/audio-transcriptions/audio.json
+python tools/hormozi-brain/build_brain.py --audio-transcriptions-dir private-input/audio-transcriptions
 ```
+
+The non-estimate command writes only timestamped JSON to the ignored
+`private-input/audio-transcriptions/` directory. The builder matches each JSON
+record to an approved manifest audio path, writes a cited atom under `audio/`,
+and marks the corresponding ledger record included. Unmatched or malformed
+outputs remain explicitly reported and are not ingested.
 
 The OCR batch is driven only by the evidence report's approved page list,
 retains rendered PNGs for visual QA, records confidence, distinguishes true

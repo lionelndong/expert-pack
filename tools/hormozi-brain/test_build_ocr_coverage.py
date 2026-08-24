@@ -172,3 +172,36 @@ def test_restricted_handoff_rejects_inconsistent_duplicate_hash(tmp_path):
     result = BUILD.integrate_restricted(tmp_path / "pack", manifest, ledger, resolution_path)
     assert result["status"] == "invalid_resolution_report"
     assert all(row["status"] == "quarantined_restricted_authorization_required" for row in ledger)
+
+
+def test_ingest_audio_transcription_preserves_timestamped_provenance(tmp_path):
+    audio = tmp_path / "Money Models.mp3"
+    audio.write_bytes(b"approved audio placeholder")
+    transcription_root = tmp_path / "transcriptions"
+    transcription_root.mkdir()
+    (transcription_root / "money-models.json").write_text(json.dumps({
+        "status": "transcribed",
+        "audio": str(audio),
+        "model": "gpt-4o-mini-transcribe",
+        "transcribed_at": "2026-08-23T00:00:00+00:00",
+        "duration_seconds": 125,
+        "segments": [
+            {"start": 0, "end": 3, "text": "Make the offer clear."},
+            {"start": 62.4, "end": 65, "text": "Then measure the result."},
+        ],
+    }), encoding="utf-8")
+    ledger = [{"record_id": "derived-audio-money-models", "status": "metadata_ready_pending_transcription"}]
+    result = BUILD.ingest_audio_transcriptions(
+        transcription_root,
+        tmp_path / "pack",
+        ledger,
+        [{"source_id": "audio-source", "path": str(audio), "relative_path": "library/Money Models.mp3", "hash": "sha256:audio"}],
+    )
+    assert result["status"] == "complete"
+    assert result["transcribed"] == 1
+    assert ledger[0]["status"] == "included_audio_transcript"
+    output = tmp_path / "pack" / "audio" / "money-models-transcript.md"
+    text = output.read_text(encoding="utf-8")
+    assert "[00:01:02] Then measure the result." in text
+    assert "sha256:audio" in text
+    assert any(row.get("kind") == "derived_audio_transcript" for row in ledger)

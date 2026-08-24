@@ -422,6 +422,139 @@ def audio_metadata(path: Path, output: Path, ledger: list[dict[str, object]]) ->
     return result
 
 
+def audio_timestamp(seconds: object) -> str:
+    """Render an audio segment locator in a stable timestamp format."""
+
+    try:
+        total = max(0, int(float(seconds or 0)))
+    except (TypeError, ValueError):
+        total = 0
+    hours, remainder = divmod(total, 3600)
+    minutes, secs = divmod(remainder, 60)
+    return f"[{hours:02d}:{minutes:02d}:{secs:02d}]"
+
+
+def audio_transcript_markdown(source: dict[str, object], payload: dict[str, object]) -> str:
+    """Build a searchable, timestamp-cited atom from transcribe_audio JSON."""
+
+    title = str(Path(str(source.get("path", "audio"))).stem)
+    source_path = str(source.get("relative_path") or source.get("path") or title)
+    segments = payload.get("segments")
+    lines: list[str] = []
+    if isinstance(segments, list):
+        for segment in segments:
+            if not isinstance(segment, dict):
+                continue
+            text = str(segment.get("text", "")).strip()
+            if text:
+                lines.append(f"{audio_timestamp(segment.get('start'))} {text}")
+    if not lines and str(payload.get("text", "")).strip():
+        lines = [str(payload["text"]).strip()]
+    transcript = "\n".join(lines).replace("[[", "[\u200b[")
+    body = (
+        f"# {title} — timestamped transcript\n\n"
+        "> Evidence boundary: authorized internal audio transcription for decision support; "
+        "not a current statement, endorsement, or impersonation of Alex Hormozi.\n\n"
+        "## Provenance\n\n"
+        f"- Source file: `{source_path}`\n"
+        f"- Source hash: `{source.get('hash')}`\n"
+        f"- Transcription model: `{payload.get('model', 'unknown')}`\n"
+        f"- Transcribed at: `{payload.get('transcribed_at', payload.get('processed_at', 'unknown'))}`\n"
+        f"- Duration: `{payload.get('duration_seconds')}` seconds\n"
+        f"- Timestamped segments: `{len(lines)}`\n\n"
+        "## Transcript\n\n```text\n" + transcript + "\n```\n"
+    )
+    frontmatter = {
+        "title": f"{title} — timestamped transcript",
+        "type": "reference",
+        "pack": "alex-hormozi-brain",
+        "tags": ["audio-transcript", "authorized-internal", "alex-hormozi", "timestamped"],
+        "schema_version": "4.1",
+        "id": f"alex-hormozi-brain/audio/{slug(title)}/transcript",
+        "content_hash": sha256_text(body),
+        "verified_at": "2026-08-23",
+        "verified_by": "openai-audio-transcriber",
+        "confidence": "transcribed",
+        "retrieval_strategy": "standard",
+        "source_file": source_path,
+        "source_hash": source.get("hash"),
+    }
+    return "---\n" + yaml.safe_dump(frontmatter, sort_keys=False, allow_unicode=True).strip() + "\n---\n" + body
+
+
+def ingest_audio_transcriptions(
+    transcription_root: Path,
+    output: Path,
+    ledger: list[dict[str, object]],
+    audio_rows: list[dict[str, object]],
+) -> dict[str, object]:
+    """Ingest only approved audio outputs that match a manifest source path."""
+
+    result: dict[str, object] = {
+        "status": "not_requested" if not transcription_root.is_dir() else "complete",
+        "root": str(transcription_root),
+        "transcribed": 0,
+        "unmatched": [],
+        "invalid": [],
+        "duplicates": [],
+        "outputs": [],
+    }
+    if not transcription_root.is_dir():
+        return result
+    target = output / "audio"
+    target.mkdir(parents=True, exist_ok=True)
+    by_path: dict[Path, dict[str, object]] = {}
+    for row in audio_rows:
+        path = Path(str(row.get("path", "")))
+        if path:
+            by_path[path.resolve()] = row
+    seen_sources: set[str] = set()
+    for path in sorted(transcription_root.glob("*.json")):
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            result["invalid"].append(path.name)
+            continue
+        if not isinstance(payload, dict) or payload.get("status") != "transcribed":
+            result["invalid"].append(path.name)
+            continue
+        raw_audio = str(payload.get("audio", ""))
+        source = by_path.get(Path(raw_audio).resolve()) if raw_audio else None
+        if source is None:
+            result["unmatched"].append(path.name)
+            continue
+        source_id = str(source.get("source_id") or source.get("path"))
+        if source_id in seen_sources:
+            result["duplicates"].append(path.name)
+            continue
+        seen_sources.add(source_id)
+        destination = target / f"{slug(Path(str(source.get('path', 'audio'))).stem)}-transcript.md"
+        destination.write_text(audio_transcript_markdown(source, payload), encoding="utf-8", newline="\n")
+        result["transcribed"] += 1
+        result["outputs"].append(str(destination))
+        ledger_id = f"derived-audio-{slug(Path(str(source.get('path', 'audio'))).stem)}"
+        for row in ledger:
+            if row.get("record_id") == ledger_id:
+                row["status"] = "included_audio_transcript"
+                row["transcription_provider"] = "openai"
+                row["timestamped"] = True
+        ledger.append({
+            "record_id": f"derived-audio-transcript-{slug(Path(str(source.get('path', 'audio'))).stem)}",
+            "kind": "derived_audio_transcript",
+            "title": f"{Path(str(source.get('path', 'audio'))).stem} — timestamped transcript",
+            "status": "included_audio_transcript",
+            "source_file": source.get("relative_path") or source.get("path"),
+            "source_hash": source.get("hash"),
+            "pack_membership": "audio",
+            "locator": "timestamped segments",
+            "transcription_provider": "openai",
+            "output": str(destination),
+        })
+    if result["invalid"] or result["unmatched"]:
+        result["status"] = "complete_with_unresolved_outputs"
+    return result
+
+
 def make_ledger(manifest: dict, evidence: dict, skill_report: dict, container_report: dict | None = None) -> list[dict[str, object]]:
     evidence_by_id = {str(row["source_id"]): row for row in evidence.get("sources", [])}
     skills_by_id = {str(row["source_id"]): row for row in skill_report.get("sources", [])}
@@ -988,11 +1121,11 @@ def write_pack(output: Path, ledger: list[dict[str, object]], transcript_report:
         "updated": "2026-08-23",
         "freshness": {"refresh_cycle": "P30D", "last_full_review": "2026-08-23", "verified_file_count": included_count, "total_file_count": inventory_count, "coverage_pct": round(included_count / inventory_count * 100, 2) if inventory_count else 0},
         "authority_boundary": {"in_scope": "Evidence-backed frameworks and decision patterns represented by retrieved approved or public source records.", "out_of_scope": ["Claims without a supporting atom", "Current personal opinions, endorsements, or authorization by Alex Hormozi", "Quarantined, unauthorized, excluded, or unresolved sources", "Legal, tax, investment, medical, or regulated advice"], "refuse_when": ["No supporting source exists", "Source rights or provenance are unresolved"], "no_source_no_claim": True},
-        "context": {"always": ["overview.md", "STATUS.md"], "searchable": ["evidence/", "curated-skills/", "youtube/", "ebook/", "ocr/", "agent-skills/"], "on_demand": ["meta/"]},
+        "context": {"always": ["overview.md", "STATUS.md"], "searchable": ["evidence/", "curated-skills/", "youtube/", "ebook/", "audio/", "ocr/", "agent-skills/"], "on_demand": ["meta/"]},
     }
     (output / "manifest.yaml").write_text(yaml.safe_dump(manifest, sort_keys=False, allow_unicode=True), encoding="utf-8", newline="\n")
     (output / "overview.md").write_text("# Alex Hormozi — Complete Internal Brain\n\n> Source-grounded decision support. This corpus synthesizes retrieved evidence; it does not claim to be Alex Hormozi or speak for him.\n\n## Surfaces\n\n" + f"- {transcript_report['unique_videos']} structured YouTube transcript records.\n- {counts.get('evidence', 0)} approved evidence atoms.\n- {counts.get('curated-skills', 0)} curated skill-source atoms.\n- {len(skill_report.get('packages', []))} executable Paperclip skill packages.\n- OCR/audio/channel gaps are explicit in `meta/brain-coverage.json`.\n", encoding="utf-8", newline="\n")
-    for directory in ("evidence", "curated-skills", "youtube", "ebook", "ocr", "agent-skills", "meta"):
+    for directory in ("evidence", "curated-skills", "youtube", "ebook", "audio", "ocr", "agent-skills", "meta"):
         index_path = output / directory / "_index.md"
         index_path.parent.mkdir(parents=True, exist_ok=True)
         index_path.write_text(f"# {directory.replace('-', ' ').title()}\n\nGenerated navigation index for the private Hormozi brain.\n", encoding="utf-8", newline="\n")
@@ -1034,6 +1167,7 @@ def main() -> int:
     parser.add_argument("--ocr-results", type=Path, default=DEFAULT_OCR_RESULTS)
     parser.add_argument("--no-epub", action="store_true")
     parser.add_argument("--no-audio-metadata", action="store_true")
+    parser.add_argument("--audio-transcriptions-dir", type=Path, default=ROOT / "private-input/audio-transcriptions", help="Optional directory of approved transcribe_audio JSON outputs to ingest")
     args = parser.parse_args()
     output = args.output.resolve()
     private_root = (ROOT / "private-input").resolve()
@@ -1067,11 +1201,13 @@ def main() -> int:
     extras: dict[str, object] = {
         "ebook": [],
         "audio": [],
+        "audio_transcriptions": {},
         "containers": container_report,
         "ocr": integrate_ocr(output, args.ocr_results, ledger),
         "restricted": integrate_restricted(output, manifest, ledger),
     }
     seen_hashes: set[str] = set()
+    audio_rows: list[dict[str, object]] = []
     for source in manifest.get("sources", []):
         path = Path(str(source.get("path", "")))
         if not path.is_file() or source.get("rights_status") == "excluded":
@@ -1084,7 +1220,13 @@ def main() -> int:
             if path.suffix.casefold() == ".epub":
                 extras["ebook"].append(extract_epub(path, output, ledger))
             elif not args.no_audio_metadata:
-                extras["audio"].append(audio_metadata(path, output, ledger))
+                audio_result = audio_metadata(path, output, ledger)
+                audio_result["source_id"] = source.get("source_id")
+                audio_result["hash"] = source.get("hash")
+                extras["audio"].append(audio_result)
+                audio_rows.append({"source_id": source.get("source_id"), "path": str(path), "relative_path": source.get("relative_path"), "hash": source.get("hash")})
+    if audio_rows and not args.no_audio_metadata:
+        extras["audio_transcriptions"] = ingest_audio_transcriptions(args.audio_transcriptions_dir, output, ledger, audio_rows)
     for ebook_result in extras["ebook"]:
         if ebook_result.get("status") != "included_extracted":
             continue

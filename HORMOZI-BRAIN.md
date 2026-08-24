@@ -25,7 +25,8 @@ committed to this repository.
   with page/line provenance and OCR/unsupported-file reporting.
 - `tools/hormozi-brain/build_brain.py` — builds the composite private pack,
   normalizes all 273 supplied videos into timestamp-bounded atoms, extracts
-  the EPUB, records audio metadata, and mirrors the 24 executable skills.
+  the EPUB, records audio metadata, ingests approved timestamped audio
+  transcription JSON, and mirrors the 24 executable skills.
 - `tools/hormozi-brain/fetch_official.py` — opt-in metadata/subtitle-only
   refresh for explicitly verified official channels.
 - `tools/hormozi-brain/transcribe_official.py` — fail-closed audio-only
