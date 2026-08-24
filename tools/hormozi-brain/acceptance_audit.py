@@ -51,6 +51,12 @@ COMPLETION_REQUIREMENTS = [
         "evidence": ["meta/skill-validation.json", "agent-skills/", "private-input/skills/alex-hormozi/"],
     },
     {
+        "id": "book_to_skills_aliases",
+        "requirement": "The Alex Book-to-Skills export is hash-audited and deduplicated against canonical Paperclip sources.",
+        "check": "book_to_skills_aliases",
+        "evidence": ["meta/brain-coverage.json", "meta/source-coverage.md"],
+    },
+    {
         "id": "restricted_playbooks",
         "requirement": "The two restricted playbooks are authorized, hashed, deduplicated, and OCR-ingested before inclusion.",
         "check": "restricted_sources",
@@ -304,6 +310,15 @@ def main() -> int:
             f"{len(official_estimate.get('videos', []))} captionless videos; chunks={official_estimate.get('total_estimated_chunks')}; api_called={official_estimate.get('api_called')}; media_downloaded={official_estimate.get('media_downloaded')}",
         ),
         "paperclip_skills": check("pass" if len(packages) == 24 and not missing_skills and not coverage.get("skills", {}).get("invalid") and skill_validation.get("overall_status") == "pass" else "fail", f"{len(packages)} packages; structural={not missing_skills}; workflow_validation={skill_validation.get('overall_status', 'missing')}"),
+        "book_to_skills_aliases": check(
+            "pass"
+            if coverage.get("extras", {}).get("book_to_skills", {}).get("status") == "duplicate_export_audited"
+            and int(coverage.get("extras", {}).get("book_to_skills", {}).get("source_file_count", 0) or 0) > 0
+            and coverage.get("extras", {}).get("book_to_skills", {}).get("matched_hash_count") == coverage.get("extras", {}).get("book_to_skills", {}).get("source_file_count")
+            and coverage.get("extras", {}).get("book_to_skills", {}).get("unmatched_count") == 0
+            else "pending_external_source" if not coverage.get("extras", {}).get("book_to_skills") else "fail",
+            f"status={coverage.get('extras', {}).get('book_to_skills', {}).get('status', 'missing')}; matched={coverage.get('extras', {}).get('book_to_skills', {}).get('matched_hash_count', 0)}/{coverage.get('extras', {}).get('book_to_skills', {}).get('source_file_count', 0)}; unmatched={coverage.get('extras', {}).get('book_to_skills', {}).get('unmatched_count', 0)}",
+        ),
         "ocr_pages": check(
             "pass" if ocr.get("requested_pages") == 442 and ocr.get("recovered_pages") == 442 and ocr_visual_qa_complete
             else "pending_manual_visual_qa" if ocr.get("requested_pages") == 442 and ocr.get("recovered_pages") == 442

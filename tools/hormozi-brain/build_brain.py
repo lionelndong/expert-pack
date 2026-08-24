@@ -77,6 +77,70 @@ def find_paperclip() -> Path | None:
     return next((path.resolve() for path in candidates if path.is_dir()), None)
 
 
+def find_book_to_skills() -> Path | None:
+    """Find the Alex-specific Book-to-Skills export for alias auditing."""
+
+    candidates: list[Path] = []
+    if os.environ.get("HORMOZI_BOOK_TO_SKILLS_ROOT"):
+        candidates.append(Path(os.environ["HORMOZI_BOOK_TO_SKILLS_ROOT"]))
+    candidates.append(Path.home() / "Downloads" / "book-to-skill-master" / "skills" / "alex-hormozi")
+    return next((path.resolve() for path in candidates if path.is_dir()), None)
+
+
+def audit_book_to_skills(root: Path | None, ledger: list[dict[str, object]]) -> dict[str, object]:
+    """Record a hash-only alias audit for the Book-to-Skills export.
+
+    The export contains the same 24 Alex packages as the Paperclip tree.  It
+    is therefore represented as source aliases rather than copied a second
+    time into the searchable corpus.  Only paths and SHA-256 values are read;
+    source text is never duplicated by this audit.
+    """
+
+    if root is None or not root.is_dir():
+        return {
+            "status": "source_not_found",
+            "source_file_count": 0,
+            "matched_hash_count": 0,
+            "unmatched_count": 0,
+            "duplicate_count": 0,
+            "aliases": [],
+            "notes": ["Book-to-Skills Alex export was not found; no alias was silently assumed."],
+        }
+    canonical_by_hash: defaultdict[str, list[dict[str, object]]] = defaultdict(list)
+    for row in ledger:
+        if row.get("kind") != "inventory_record" or not row.get("sha256"):
+            continue
+        canonical_by_hash[str(row["sha256"])].append(row)
+    aliases: list[dict[str, object]] = []
+    for path in sorted(item for item in root.rglob("*") if item.is_file()):
+        relative = path.relative_to(root).as_posix()
+        digest = sha256_file(path)
+        matches = canonical_by_hash.get(digest, [])
+        aliases.append({
+            "alias_id": f"book-to-skills/alex-hormozi/{relative}",
+            "relative_path": relative,
+            "sha256": digest,
+            "status": "duplicate_by_sha256" if matches else "unmatched_external_source",
+            "duplicate_of": [str(row.get("record_id")) for row in matches],
+            "duplicate_group": [str(row.get("record_id")) for row in matches] + [f"book-to-skills/alex-hormozi/{relative}"],
+        })
+    matched = sum(item["status"] == "duplicate_by_sha256" for item in aliases)
+    unmatched = len(aliases) - matched
+    return {
+        "status": "duplicate_export_audited" if aliases and unmatched == 0 else "incomplete_external_export" if aliases else "source_empty",
+        "root": str(root),
+        "source_file_count": len(aliases),
+        "matched_hash_count": matched,
+        "unmatched_count": unmatched,
+        "duplicate_count": matched,
+        "aliases": aliases,
+        "notes": [
+            "Book-to-Skills aliases are hash-linked to canonical Paperclip records and are not copied as duplicate knowledge.",
+            "The alias audit is provenance metadata only; source text remains in the ignored local inputs and canonical pack outputs.",
+        ],
+    }
+
+
 def parse_sections(path: Path) -> list[dict[str, object]]:
     lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
     result: list[dict[str, object]] = []
@@ -1255,7 +1319,8 @@ def write_pack(output: Path, ledger: list[dict[str, object]], transcript_report:
         "context": {"always": ["overview.md", "STATUS.md"], "searchable": ["evidence/", "curated-skills/", "youtube/", "ebook/", "audio/", "ocr/", "agent-skills/"], "on_demand": ["meta/"]},
     }
     (output / "manifest.yaml").write_text(yaml.safe_dump(manifest, sort_keys=False, allow_unicode=True), encoding="utf-8", newline="\n")
-    (output / "overview.md").write_text("# Alex Hormozi — Complete Internal Brain\n\n> Source-grounded decision support. This corpus synthesizes retrieved evidence; it does not claim to be Alex Hormozi or speak for him.\n\n## Surfaces\n\n" + f"- {transcript_report['unique_videos']} structured YouTube transcript records.\n- {counts.get('evidence', 0)} approved evidence atoms.\n- {counts.get('curated-skills', 0)} curated skill-source atoms.\n- {len(skill_report.get('packages', []))} executable Paperclip skill packages.\n- OCR/audio/channel gaps are explicit in `meta/brain-coverage.json`.\n", encoding="utf-8", newline="\n")
+    book_to_skills = extras.get("book_to_skills", {})
+    (output / "overview.md").write_text("# Alex Hormozi — Complete Internal Brain\n\n> Source-grounded decision support. This corpus synthesizes retrieved evidence; it does not claim to be Alex Hormozi or speak for him.\n\n## Surfaces\n\n" + f"- {transcript_report['unique_videos']} structured YouTube transcript records.\n- {counts.get('evidence', 0)} approved evidence atoms.\n- {counts.get('curated-skills', 0)} curated skill-source atoms.\n- {len(skill_report.get('packages', []))} executable Paperclip skill packages.\n- Book-to-Skills aliases audited: {book_to_skills.get('matched_hash_count', 0)}/{book_to_skills.get('source_file_count', 0)} hash matches.\n- OCR/audio/channel gaps are explicit in `meta/brain-coverage.json`.\n", encoding="utf-8", newline="\n")
     for directory in ("evidence", "curated-skills", "youtube", "ebook", "audio", "ocr", "agent-skills", "meta"):
         index_path = output / directory / "_index.md"
         index_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1271,7 +1336,7 @@ def write_pack(output: Path, ledger: list[dict[str, object]], transcript_report:
     status_lines += [f"| `{name}` | {count} |" for name, count in sorted(report["summary"].items())]
     status_lines += ["", "## Coverage categories", "", "| Category | Count |", "|---|---:|"]
     status_lines += [f"| `{name}` | {count} |" for name, count in category_report["categories"].items()]
-    status_lines += ["", "## Ledger contract", "", "- Every inventory record carries a stable ID, title, approved-root origin, format, SHA-256 field, rights status, extraction status, pack membership, and duplicate group. Hash-unavailable records are explicit.", "", "## Explicit pending items", "", "- The two `LEAKED_Pricing_Playbook.pdf` records remain quarantined pending documented authorization.", f"- Official videos without captions pending approved transcription: {len(category_report['missing']['official_captionless_videos'])}.", f"- Audio works pending approved transcription: {len(category_report['missing']['audio_pending_transcription'])}.", f"- Inventory records whose local source file is missing: {len(category_report['missing']['inventory_records'])}.", "- OCR and official-channel enumeration are never silently treated as complete."]
+    status_lines += ["", "## Ledger contract", "", "- Every inventory record carries a stable ID, title, approved-root origin, format, SHA-256 field, rights status, extraction status, pack membership, and duplicate group. Hash-unavailable records are explicit.", "", "## Book-to-Skills alias audit", "", f"- Status: `{book_to_skills.get('status', 'missing')}`; {book_to_skills.get('matched_hash_count', 0)}/{book_to_skills.get('source_file_count', 0)} files matched canonical Paperclip hashes; unmatched={book_to_skills.get('unmatched_count', 0)}.", "- Alias records are provenance-only and do not duplicate searchable content.", "", "## Explicit pending items", "", "- The two `LEAKED_Pricing_Playbook.pdf` records remain quarantined pending documented authorization.", f"- Official videos without captions pending approved transcription: {len(category_report['missing']['official_captionless_videos'])}.", f"- Audio works pending approved transcription: {len(category_report['missing']['audio_pending_transcription'])}.", f"- Inventory records whose local source file is missing: {len(category_report['missing']['inventory_records'])}.", "- OCR and official-channel enumeration are never silently treated as complete."]
     coverage_body = "\n".join(status_lines) + "\n"
     coverage_fm = {"title": "Brain coverage report", "type": "meta", "pack": "alex-hormozi-brain", "tags": ["coverage", "provenance"], "schema_version": "4.1", "id": "alex-hormozi-brain/meta/source-coverage", "content_hash": sha256_text(coverage_body), "retrieval_strategy": "on_demand", "verified_at": BUILD_DATE, "verified_by": "brain-builder", "confidence": "crawled"}
     (meta / "source-coverage.md").write_text("---\n" + yaml.safe_dump(coverage_fm, sort_keys=False, allow_unicode=True).strip() + "\n---\n" + coverage_body, encoding="utf-8", newline="\n")
@@ -1336,6 +1401,7 @@ def main() -> int:
         "containers": container_report,
         "ocr": integrate_ocr(output, args.ocr_results, ledger),
         "restricted": integrate_restricted(output, manifest, ledger),
+        "book_to_skills": audit_book_to_skills(find_book_to_skills(), ledger),
     }
     seen_hashes: set[str] = set()
     audio_rows: list[dict[str, object]] = []
