@@ -687,7 +687,7 @@ def copy_skills(output: Path) -> dict[str, object]:
             "verified_by": "paperclip-skill-normalizer",
             "confidence": "crawled",
             "related": ["overview.md"],
-            "retrieval_strategy": "standard",
+            "retrieval_strategy": "atomic",
         }
         (pack_destination / f"{package.name}.md").write_text(
             "---\n" + yaml.safe_dump(frontmatter, sort_keys=False, allow_unicode=True).strip() + "\n---\n" + atom_body,
