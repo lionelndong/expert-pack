@@ -4,9 +4,11 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import sqlite3
+from datetime import datetime, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -169,7 +171,25 @@ def write_completion_matrix(pack: Path, checks: dict[str, dict[str, str]]) -> di
         lines.append(f"| `{row['requirement']}` | `{row['status']}` | {', '.join(f'`{item}`' for item in row['evidence'])} |")
     lines.extend(["", "## Details", ""])
     lines.extend(f"- **{row['id']}**: {row['detail']}" for row in rows)
-    (pack / "meta" / "completion-matrix.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    body = "\n".join(lines) + "\n"
+    content_hash = hashlib.sha256(body.encode("utf-8")).hexdigest()
+    frontmatter = {
+        "title": "Hormozi brain completion matrix",
+        "type": "meta",
+        "pack": "alex-hormozi-brain",
+        "tags": ["coverage", "acceptance", "provenance"],
+        "schema_version": "4.1",
+        "id": "alex-hormozi-brain/meta/completion-matrix",
+        "content_hash": f"sha256:{content_hash}",
+        "retrieval_strategy": "on_demand",
+        "verified_at": datetime.now(timezone.utc).date().isoformat(),
+        "verified_by": "acceptance-audit",
+        "confidence": "inferred",
+    }
+    import yaml
+
+    rendered = "---\n" + yaml.safe_dump(frontmatter, sort_keys=False).strip() + "\n---\n" + body
+    (pack / "meta" / "completion-matrix.md").write_text(rendered, encoding="utf-8")
     return matrix
 
 

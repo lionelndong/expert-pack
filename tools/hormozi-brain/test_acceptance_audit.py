@@ -46,3 +46,6 @@ def test_completion_matrix_preserves_pending_requirement_statuses(tmp_path):
     assert "restricted_playbooks" in matrix["pending_requirements"]
     report = json.loads((pack / "meta" / "completion-matrix.json").read_text(encoding="utf-8"))
     assert report["overall_status"] == matrix["overall_status"]
+    markdown = (pack / "meta" / "completion-matrix.md").read_text(encoding="utf-8")
+    assert markdown.startswith("---\n")
+    assert "id: alex-hormozi-brain/meta/completion-matrix" in markdown

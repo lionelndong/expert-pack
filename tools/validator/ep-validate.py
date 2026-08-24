@@ -288,7 +288,7 @@ class Validator:
             # map for every pack type, including person packs.  It is
             # navigation metadata rather than a person-specific atom, so it
             # intentionally keeps its cross-schema filename.
-            if rel_dir == 'meta' and bn == 'source-coverage.md':
+            if rel_dir == 'meta' and bn in {'source-coverage.md', 'completion-matrix.md'}:
                 continue
             prefix = prefixes.get(rel_dir)
             if prefix is None:
