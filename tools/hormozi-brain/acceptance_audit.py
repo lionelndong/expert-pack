@@ -6,9 +6,109 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import sqlite3
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
+
+COMPLETION_REQUIREMENTS = [
+    {
+        "id": "coverage_ledger",
+        "requirement": "All 428 inventory records have explicit statuses and no silent omissions.",
+        "check": "inventory_ledger",
+        "evidence": ["meta/brain-coverage.json", "meta/source-coverage.md"],
+    },
+    {
+        "id": "youtube_transcripts",
+        "requirement": "The supplied 273 unique videos are normalized into timestamped transcript records.",
+        "check": "supplied_transcripts",
+        "evidence": ["meta/brain-coverage.json", "youtube/"],
+    },
+    {
+        "id": "official_channel_coverage",
+        "requirement": "Verified official-channel coverage is enumerated and missing captions are explicit.",
+        "check": "official_channel_coverage",
+        "evidence": ["meta/official-channel-catalog.json", "meta/official-transcription-estimate.json"],
+    },
+    {
+        "id": "official_captionless_transcripts",
+        "requirement": "Every verified official-channel video without captions has an approved transcript or an explicit unresolved status.",
+        "check": "official_captionless_transcripts",
+        "evidence": ["meta/official-channel-catalog.json", "youtube/"],
+    },
+    {
+        "id": "books_pdfs_ocr_epub_containers",
+        "requirement": "Books, PDFs, OCR pages, EPUB chapters, and container manifests are provenance-checked.",
+        "check": "ocr_pages",
+        "evidence": ["meta/brain-coverage.json", "meta/ocr-batch-report.json", "meta/container-inspection.json", "ebook/"],
+    },
+    {
+        "id": "paperclip_skills",
+        "requirement": "All 24 Paperclip packages are searchable and structurally/workflow validated.",
+        "check": "paperclip_skills",
+        "evidence": ["meta/skill-validation.json", "agent-skills/", "private-input/skills/alex-hormozi/"],
+    },
+    {
+        "id": "restricted_playbooks",
+        "requirement": "The two restricted playbooks are authorized, hashed, deduplicated, and OCR-ingested before inclusion.",
+        "check": "restricted_sources",
+        "evidence": ["../restricted-processing/restricted-source-resolution.json", "meta/brain-coverage.json"],
+    },
+    {
+        "id": "restricted_ocr",
+        "requirement": "Authorized restricted OCR has page-level provenance and visual-QA evidence.",
+        "check": "restricted_ocr",
+        "evidence": ["../restricted-processing/", "ocr/"],
+    },
+    {
+        "id": "audio_transcripts",
+        "requirement": "Authorized audio works are transcribed into timestamp-located searchable atoms.",
+        "check": "audio",
+        "evidence": ["meta/brain-coverage.json", "audio/"],
+    },
+    {
+        "id": "openai_embedding_path",
+        "requirement": "The direct OpenAI embedding provider and local SQLite vector path are implemented without a local model.",
+        "check": "embedding_path",
+        "evidence": ["../../runtime/ep-mcp/ep_mcp/embeddings/openai.py", "../../runtime/ep-mcp/ep_mcp/index/sqlite_store.py", "meta/embedding-estimate.json"],
+    },
+    {
+        "id": "mcp_brain_surface",
+        "requirement": "One cited agent-facing MCP brain exposes the four Hormozi-specific tools.",
+        "check": "mcp_surface",
+        "evidence": ["../../runtime/ep-mcp/ep_mcp/server.py", "../../runtime/ep-mcp/tests/unit/test_mcp_server.py"],
+    },
+    {
+        "id": "citation_quality",
+        "requirement": "Offline retrieval returns relevant top-five sources with valid locators.",
+        "check": "offline_retrieval",
+        "evidence": ["meta/quality-report.json"],
+    },
+    {
+        "id": "semantic_index",
+        "requirement": "The OpenAI vector index is built locally and semantic retrieval is benchmarked.",
+        "check": "semantic_retrieval",
+        "evidence": ["../../runtime/ep-mcp-index/alex-hormozi-brain/index.db", "meta/quality-report.json"],
+    },
+    {
+        "id": "decision_support",
+        "requirement": "Decision scenarios enforce evidence, inference, conflict, and boundary handling.",
+        "check": "decision_scenarios",
+        "evidence": ["meta/quality-report.json", "meta/decision-support-evaluation.json"],
+    },
+    {
+        "id": "live_agent_evaluation",
+        "requirement": "Twenty live decision scenarios are evaluated for multi-source evidence and conflict disclosure.",
+        "check": "live_agent_evaluation",
+        "evidence": ["meta/decision-support-evaluation.json"],
+    },
+    {
+        "id": "company_staging",
+        "requirement": "The service is staged for company authentication, rate limiting, and audit logging.",
+        "check": "company_deployment",
+        "evidence": ["meta/company-deployment-readiness.json", "../../config/ep-mcp.company.example.yaml", "../../runtime/ep-mcp/ep_mcp/auth.py"],
+    },
+]
 
 
 def check(status: str, detail: str) -> dict[str, str]:
@@ -25,6 +125,52 @@ def read_json(path: Path, default: dict | None = None) -> dict:
     except (OSError, json.JSONDecodeError):
         return default.copy() if default else {}
     return value if isinstance(value, dict) else (default.copy() if default else {})
+
+
+def sqlite_embedding_index_ready(path: Path) -> bool:
+    """Verify the local SQLite index has an OpenAI model and chunks."""
+
+    if not path.is_file():
+        return False
+    try:
+        with sqlite3.connect(path) as connection:
+            rows = dict(connection.execute("SELECT key, value FROM meta WHERE key IN ('embedding_model', 'embedding_dimension', 'chunk_count')"))
+        return (
+            str(rows.get("embedding_model", "")).startswith("openai/")
+            and int(rows.get("embedding_dimension", 0) or 0) == 1536
+            and int(rows.get("chunk_count", 0) or 0) > 0
+        )
+    except (OSError, sqlite3.Error, TypeError, ValueError):
+        return False
+
+
+def write_completion_matrix(pack: Path, checks: dict[str, dict[str, str]]) -> dict[str, object]:
+    """Write a requirement-to-evidence map for human and machine review."""
+
+    rows: list[dict[str, object]] = []
+    for requirement in COMPLETION_REQUIREMENTS:
+        check_result = checks.get(str(requirement["check"]), {"status": "missing", "detail": "check not emitted"})
+        rows.append({
+            **requirement,
+            "status": check_result.get("status", "missing"),
+            "detail": check_result.get("detail", ""),
+        })
+    pending = [row["id"] for row in rows if row["status"] != "pass"]
+    matrix = {
+        "report_version": "1.0",
+        "overall_status": "pass" if not pending else "pending_external_gates",
+        "requirements": rows,
+        "pending_requirements": pending,
+    }
+    json_path = pack / "meta" / "completion-matrix.json"
+    json_path.write_text(json.dumps(matrix, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    lines = ["# Hormozi brain completion matrix", "", f"Overall status: `{matrix['overall_status']}`", "", "| Requirement | Status | Evidence |", "|---|---|---|"]
+    for row in rows:
+        lines.append(f"| `{row['requirement']}` | `{row['status']}` | {', '.join(f'`{item}`' for item in row['evidence'])} |")
+    lines.extend(["", "## Details", ""])
+    lines.extend(f"- **{row['id']}**: {row['detail']}" for row in rows)
+    (pack / "meta" / "completion-matrix.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return matrix
 
 
 def main() -> int:
@@ -54,6 +200,12 @@ def main() -> int:
     catalog_statuses = {}
     for video in catalog_videos:
         catalog_statuses[str(video.get("status"))] = catalog_statuses.get(str(video.get("status")), 0) + 1
+    captionless_videos = [
+        video for video in catalog_videos
+        if video.get("status") == "caption_unavailable_pending_openai_transcription"
+    ]
+    embedding_index_path = ROOT / "runtime/ep-mcp-index/alex-hormozi-brain/index.db"
+    embedding_index_ready = sqlite_embedding_index_ready(embedding_index_path)
     ocr = coverage.get("extras", {}).get("ocr", {})
     restricted_pack = coverage.get("extras", {}).get("restricted", {})
     coverage_manual_review_pages = sum(
@@ -84,6 +236,10 @@ def main() -> int:
         "inventory_ledger": check("pass" if len(inventory) == 428 and all(row.get("record_id") and row.get("status") for row in inventory) else "fail" if coverage else "pending", f"{len(inventory)} inventory records; every record has an ID and status"),
         "supplied_transcripts": check("pass" if coverage.get("transcripts", {}).get("unique_videos") == 273 and coverage.get("transcripts", {}).get("duplicate_sections_removed") == 3 else "fail" if coverage else "pending", f"{coverage.get('transcripts', {}).get('unique_videos')} unique videos; {coverage.get('transcripts', {}).get('transcript_atoms')} timestamped atoms"),
         "official_channel_coverage": check("pass" if len(catalog_videos) == 517 and set(catalog_statuses) <= {"already_present", "caption_ingested", "openai_transcribed", "caption_unavailable_pending_openai_transcription"} else "pending" if not catalog else "fail", f"{len(catalog_videos)} catalog videos; statuses={catalog_statuses}"),
+        "official_captionless_transcripts": check(
+            "pass" if not captionless_videos else "pending_external_api" if not os.environ.get("OPENAI_API_KEY") else "pending_transcription",
+            f"{len(captionless_videos)} official videos remain without a transcript",
+        ),
         "official_transcription_estimate": check(
             "pass" if official_estimate.get("videos") and len(official_estimate.get("videos", [])) == 6 and official_estimate.get("metadata_available") is True and official_estimate.get("api_called") is False and official_estimate.get("media_downloaded") is False else "pending_external_metadata" if official_estimate.get("videos") and official_estimate.get("metadata_available") is False else "pending" if not official_estimate else "fail",
             f"{len(official_estimate.get('videos', []))} captionless videos; chunks={official_estimate.get('total_estimated_chunks')}; api_called={official_estimate.get('api_called')}; media_downloaded={official_estimate.get('media_downloaded')}",
@@ -115,7 +271,10 @@ def main() -> int:
             "fail-closed authorization, hash/deduplication, and optional OCR workflow is present",
         ),
         "audio": check("pending_external_api" if any(row.get("status") == "metadata_ready_pending_transcription" for row in coverage.get("extras", {}).get("audio", [])) else "pass", "Timestamped audio transcription requires OPENAI_API_KEY"),
-        "embeddings": check("pending_external_api" if not os.environ.get("OPENAI_API_KEY") else "ready_to_run", f"{estimate.get('estimated_input_tokens')} estimated tokens; projected=${estimate.get('projected_embedding_cost_usd')}; local_model={estimate.get('local_model')}"),
+        "embeddings": check(
+            "pass" if embedding_index_ready else "pending_external_api" if not os.environ.get("OPENAI_API_KEY") else "pending_index_build",
+            f"{estimate.get('estimated_input_tokens')} estimated tokens; projected=${estimate.get('projected_embedding_cost_usd')}; local_model={estimate.get('local_model')}; index_ready={embedding_index_ready}",
+        ),
         "offline_retrieval": check("pass" if quality.get("relevant_top5_rate") == 1.0 and quality.get("valid_citation_top5_rate") == 1.0 else "pending" if not quality else "fail", f"{quality.get('cases')} cases; top5 relevance={quality.get('relevant_top5_rate')}; locator validity={quality.get('valid_citation_top5_rate')}"),
         "decision_scenarios": check(
             "pass" if quality.get("decision_scenarios", {}).get("cases") == 20 and quality.get("decision_scenarios", {}).get("passed") == 20 else "pending" if not quality else "fail",
@@ -125,18 +284,30 @@ def main() -> int:
             "pass" if decision_eval.get("overall_status") == "pass" and decision_eval.get("expected_cases") == 20 and decision_eval.get("evaluated_cases") == 20 else "pending_agent_evaluation" if decision_eval.get("overall_status") == "pending_agent_responses" or not decision_eval else "fail",
             f"status={decision_eval.get('overall_status', 'not_run')}; responses={decision_eval.get('response_records', 0)}/{decision_eval.get('expected_cases', 0)}; live_agent_response_evaluation={decision_eval.get('live_agent_response_evaluation', False)}",
         ),
-        "semantic_retrieval": check("pending_external_api" if quality.get("semantic_embedding_evaluation") == "not_run" else "pass", "Requires a completed OpenAI vector index and semantic benchmark"),
+        "semantic_retrieval": check(
+            "pass" if embedding_index_ready and quality.get("semantic_embedding_evaluation") != "not_run" else "pending_external_api" if not os.environ.get("OPENAI_API_KEY") else "pending_semantic_benchmark",
+            f"index_ready={embedding_index_ready}; semantic_evaluation={quality.get('semantic_embedding_evaluation', 'missing')}",
+        ),
         "company_deployment": check(
             "pass" if readiness.get("overall_status") == "ready_for_gateway" else "staged" if readiness else "pending",
             f"Company preflight={readiness.get('overall_status', 'not_run')}; external gateway, TLS, identity policy, and distributed limits remain outside this workspace",
         ),
     }
+    checks["embedding_path"] = check(
+        "pass" if (ROOT / "runtime/ep-mcp/ep_mcp/embeddings/openai.py").is_file() and (ROOT / "runtime/ep-mcp/ep_mcp/index/sqlite_store.py").is_file() else "fail",
+        "Direct OpenAI provider, local SQLite storage, and no-local-model configuration are present",
+    )
+    checks["mcp_surface"] = check(
+        "pass" if (ROOT / "runtime/ep-mcp/ep_mcp/server.py").is_file() and (ROOT / "runtime/ep-mcp/tests/unit/test_mcp_server.py").is_file() else "fail",
+        "Hormozi MCP server tools and schema tests are present",
+    )
     pending = [name for name, value in checks.items() if value["status"].startswith("pending") or value["status"] == "staged"]
     report = {"report_version": "1.0", "overall_status": "pending_external_gates" if pending else "pass", "pending_or_staged": pending, "checks": checks, "pack": str(pack)}
     output = (args.output or pack / "meta/acceptance-audit.json").resolve()
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(report, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-    print(json.dumps({"overall_status": report["overall_status"], "pending_or_staged": pending, "output": str(output)}, indent=2))
+    matrix = write_completion_matrix(pack, checks)
+    print(json.dumps({"overall_status": report["overall_status"], "pending_or_staged": pending, "completion_matrix": matrix["overall_status"], "output": str(output)}, indent=2))
     return 0 if not [value for value in checks.values() if value["status"] == "fail"] else 1
 
 
