@@ -11,10 +11,11 @@ atoms into the local brain.
 from __future__ import annotations
 
 import argparse
-from concurrent.futures import ThreadPoolExecutor, as_completed
 import json
-from pathlib import Path
 import re
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime, timezone
+from pathlib import Path
 from urllib.request import Request, urlopen
 
 try:
@@ -22,7 +23,7 @@ try:
 except ImportError:  # pragma: no cover - exercised as a clear CLI failure.
     YoutubeDL = None
 
-from build_brain import transcript_markdown, slug
+from build_brain import slug, transcript_markdown
 
 
 def parse_vtt(raw: str) -> str:
@@ -67,10 +68,14 @@ def fetch_missing_caption(entry: dict, channel_url: str, youtube_dir: Path, opti
         track = caption_url(info)
         if not track:
             row["status"] = "caption_unavailable_pending_openai_transcription"
+            row["caption_track_status"] = "no_manual_or_automatic_caption_track"
+            row["caption_checked_at"] = datetime.now(timezone.utc).isoformat()
             return video_id, row
         text = fetch_caption(track)
         if not text:
             row["status"] = "caption_empty"
+            row["caption_track_status"] = "track_returned_empty"
+            row["caption_checked_at"] = datetime.now(timezone.utc).isoformat()
             return video_id, row
         section = {
             "title": entry.get("title") or video_id,
@@ -88,7 +93,9 @@ def fetch_missing_caption(entry: dict, channel_url: str, youtube_dir: Path, opti
         destination = youtube_dir / f"{slug(str(entry.get('title') or video_id))}-{video_id}-part-001.md"
         destination.write_text(transcript_markdown(section), encoding="utf-8", newline="\n")
         row["status"] = "caption_ingested"
-    except Exception as error:  # Network/caption failures remain visible in the catalog.
+        row["caption_track_status"] = "ingested"
+        row["caption_checked_at"] = datetime.now(timezone.utc).isoformat()
+    except Exception as error:  # Network/caption failures remain visible in the catalog.  # noqa: BLE001
         row["status"] = "caption_error"
         row["caption_error"] = type(error).__name__
     return video_id, row
