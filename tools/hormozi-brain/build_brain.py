@@ -228,6 +228,19 @@ def merge_preserved_official(output: Path, preserved: Path | None, ledger: list[
     youtube_target = output / "youtube"
     youtube_target.mkdir(parents=True, exist_ok=True)
     existing_ids = {str(row.get("video_id")) for row in ledger if row.get("video_id")}
+    catalog_statuses: dict[str, str] = {}
+    catalog_path = preserved / "meta" / "official-channel-catalog.json"
+    if catalog_path.is_file():
+        try:
+            catalog = json.loads(catalog_path.read_text(encoding="utf-8"))
+            catalog_statuses = {
+                str(video.get("video_id")): str(video.get("status", "caption_ingested"))
+                for channel in catalog.get("channels", [])
+                for video in channel.get("videos", [])
+                if video.get("video_id")
+            }
+        except (OSError, json.JSONDecodeError, TypeError):
+            catalog_statuses = {}
     added = 0
     for path in sorted(youtube_source.glob("*.md")) if youtube_source.is_dir() else []:
         text = path.read_text(encoding="utf-8", errors="replace")
@@ -241,10 +254,11 @@ def merge_preserved_official(output: Path, preserved: Path | None, ledger: list[
         if not destination.exists():
             shutil.copy2(path, destination)
         if video_id not in existing_ids:
-            ledger.append({"record_id": f"youtube-{video_id}", "kind": "derived_youtube_video", "title": path.stem, "status": "included_official_caption", "video_id": video_id, "source_file": text.split("Transcript file:", 1)[-1].splitlines()[0].strip(" `") if "Transcript file:" in text else "official-channel", "pack_membership": "youtube"})
+            catalog_status = catalog_statuses.get(video_id, "caption_ingested")
+            derived_status = "included_official_transcription" if catalog_status == "openai_transcribed" else "included_official_caption"
+            ledger.append({"record_id": f"youtube-{video_id}", "kind": "derived_youtube_video", "title": path.stem, "status": derived_status, "video_id": video_id, "source_file": text.split("Transcript file:", 1)[-1].splitlines()[0].strip(" `") if "Transcript file:" in text else "official-channel", "pack_membership": "youtube", "transcription_provider": "openai" if catalog_status == "openai_transcribed" else None})
             existing_ids.add(video_id)
             added += 1
-    catalog_path = preserved / "meta" / "official-channel-catalog.json"
     if catalog_path.is_file():
         output_meta = output / "meta"
         output_meta.mkdir(parents=True, exist_ok=True)
