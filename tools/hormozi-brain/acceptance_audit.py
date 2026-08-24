@@ -136,7 +136,22 @@ def sqlite_embedding_index_ready(path: Path) -> bool:
         return False
     try:
         with sqlite3.connect(path) as connection:
-            rows = dict(connection.execute("SELECT key, value FROM meta WHERE key IN ('embedding_model', 'embedding_dimension', 'chunk_count')"))
+            tables = {
+                str(row[0])
+                for row in connection.execute(
+                    "SELECT name FROM sqlite_master WHERE type = 'table'"
+                )
+            }
+            # SQLiteStore uses ``index_meta``.  ``meta`` is retained as a
+            # compatibility path for older test fixtures / pre-runtime index
+            # builds, but must not be assumed to be the production schema.
+            metadata_table = "index_meta" if "index_meta" in tables else "meta"
+            if metadata_table not in tables:
+                return False
+            rows = dict(connection.execute(
+                f"SELECT key, value FROM {metadata_table} "
+                "WHERE key IN ('embedding_model', 'embedding_dimension', 'chunk_count')"
+            ))
         return (
             str(rows.get("embedding_model", "")).startswith("openai/")
             and int(rows.get("embedding_dimension", 0) or 0) == 1536

@@ -21,6 +21,21 @@ def test_sqlite_embedding_index_ready_requires_openai_metadata_and_chunks(tmp_pa
     assert AUDIT.sqlite_embedding_index_ready(index)
 
 
+def test_sqlite_embedding_index_ready_reads_production_index_meta_schema(tmp_path):
+    index = tmp_path / "production-index.db"
+    with sqlite3.connect(index) as connection:
+        connection.execute("CREATE TABLE index_meta (key TEXT PRIMARY KEY, value TEXT)")
+        connection.executemany(
+            "INSERT INTO index_meta(key, value) VALUES (?, ?)",
+            [
+                ("embedding_model", "openai/text-embedding-3-small"),
+                ("embedding_dimension", "1536"),
+                ("chunk_count", "12"),
+            ],
+        )
+    assert AUDIT.sqlite_embedding_index_ready(index)
+
+
 def test_sqlite_embedding_index_ready_rejects_missing_or_wrong_metadata(tmp_path):
     assert not AUDIT.sqlite_embedding_index_ready(tmp_path / "missing.db")
     index = tmp_path / "wrong.db"
