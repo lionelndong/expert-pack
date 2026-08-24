@@ -73,6 +73,19 @@ $env:OPENAI_API_KEY = "..."
 The server binds only to `127.0.0.1` and keeps its generated index under
 `runtime/ep-mcp-index/`, which is ignored by Git.
 
+When the `alex-hormozi-brain` pack is loaded, the MCP server exposes these
+agent-first tools in addition to the generic ExpertPack tools:
+
+- `search_hormozi_brain` — filtered hybrid retrieval with source ID, title,
+  confidence, file provenance, and normalized timestamp/page/chapter locators.
+- `get_hormozi_source` — load the complete cited atom by source ID or
+  pack-relative path, with optional reconstruction metadata.
+- `get_hormozi_skill` — return one validated Paperclip skill entrypoint and its
+  supporting file list.
+- `get_brain_coverage` — report inventory, duplicate/incomplete/quarantined
+  categories, OCR status, official-channel gaps, audio gaps, and freshness
+  without exposing local filesystem paths.
+
 This is a local development setup, not a company-network deployment. Before
 exposing it beyond the machine, put the MCP endpoints behind your company’s
 authenticated gateway and explicitly configure the allowed origins. The
