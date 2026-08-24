@@ -45,6 +45,80 @@ def _clean_caption_text(value: str) -> str:
     return re.sub(r"\s+", " ", value).strip()
 
 
+def _caption_seconds(value: object) -> float | None:
+    """Parse common YouTube caption time formats into seconds."""
+
+    if value is None:
+        return None
+    raw = str(value).strip().replace(",", ".")
+    if not raw:
+        return None
+    try:
+        if re.fullmatch(r"\d+(?:\.\d+)?", raw):
+            return float(raw)
+        parts = raw.split(":")
+        if len(parts) == 2:
+            minutes, seconds = parts
+            return int(minutes) * 60 + float(seconds)
+        if len(parts) == 3:
+            hours, minutes, seconds = parts
+            return int(hours) * 3600 + int(minutes) * 60 + float(seconds)
+    except ValueError:
+        return None
+    return None
+
+
+def _format_caption_timestamp(seconds: float | None) -> str:
+    """Render a caption start as the transcript parser's ``(M:SS)`` marker."""
+
+    if seconds is None:
+        return ""
+    total = max(0, int(seconds))
+    minutes, second = divmod(total, 60)
+    if minutes >= 60:
+        hours, minutes = divmod(minutes, 60)
+        return f"({hours}:{minutes:02d}:{second:02d})"
+    return f"({minutes}:{second:02d})"
+
+
+def _dedupe_caption_segments(segments: list[tuple[float | None, str]]) -> list[tuple[float | None, str]]:
+    result: list[tuple[float | None, str]] = []
+    for start, text in segments:
+        if text and (not result or result[-1][1] != text):
+            result.append((start, text))
+    return result
+
+
+def parse_vtt_segments(raw: str) -> list[tuple[float | None, str]]:
+    """Parse WebVTT/SRT cues while retaining cue start times."""
+
+    segments: list[tuple[float | None, str]] = []
+    start: float | None = None
+    text_lines: list[str] = []
+
+    def flush() -> None:
+        nonlocal start, text_lines
+        text = _clean_caption_text(" ".join(text_lines))
+        if text:
+            segments.append((start, text))
+        start = None
+        text_lines = []
+
+    for line in raw.splitlines() + [""]:
+        value = line.strip()
+        if "-->" in value:
+            flush()
+            start = _caption_seconds(value.split("-->", 1)[0].strip().split()[0])
+            continue
+        if not value:
+            flush()
+            continue
+        if value == "WEBVTT" or value.isdigit() or value.startswith(("NOTE", "STYLE", "REGION")):
+            continue
+        text_lines.append(value)
+    return _dedupe_caption_segments(segments)
+
+
 def parse_srv3(raw: str) -> str:
     """Extract text nodes from YouTube's XML ``srv3`` caption format."""
 
@@ -57,6 +131,23 @@ def parse_srv3(raw: str) -> str:
         if value and (not lines or lines[-1] != value):
             lines.append(value)
     return "\n".join(lines)
+
+
+def parse_xml_caption_segments(raw: str) -> list[tuple[float | None, str]]:
+    """Parse SRV/TTML caption XML and retain ``start``/``begin`` locators."""
+
+    root = ElementTree.fromstring(raw)
+    segments: list[tuple[float | None, str]] = []
+    for element in root.iter():
+        tag = element.tag.rsplit("}", 1)[-1]
+        if tag not in {"text", "p"}:
+            continue
+        value = _clean_caption_text("".join(element.itertext()))
+        if not value:
+            continue
+        start = element.attrib.get("start") or element.attrib.get("begin")
+        segments.append((_caption_seconds(start), value))
+    return _dedupe_caption_segments(segments)
 
 
 def parse_json3(raw: str) -> str:
@@ -72,21 +163,60 @@ def parse_json3(raw: str) -> str:
     return "\n".join(lines)
 
 
-def parse_caption(raw: str) -> str:
-    """Parse VTT, SRV3 XML, or JSON3 captions without trusting file suffixes."""
+def parse_json3_segments(raw: str) -> list[tuple[float | None, str]]:
+    """Parse JSON3 caption events while retaining millisecond start times."""
+
+    payload = json.loads(raw)
+    segments: list[tuple[float | None, str]] = []
+    for event in payload.get("events", []) if isinstance(payload, dict) else []:
+        if not isinstance(event, dict):
+            continue
+        text = _clean_caption_text(
+            "".join(
+                str(segment.get("utf8", ""))
+                for segment in event.get("segs", [])
+                if isinstance(segment, dict)
+            )
+        )
+        if not text:
+            continue
+        raw_start = event.get("tStartMs", event.get("t"))
+        start = float(raw_start) / 1000 if raw_start is not None else None
+        segments.append((start, text))
+    return _dedupe_caption_segments(segments)
+
+
+def parse_caption_segments(raw: str) -> list[tuple[float | None, str]]:
+    """Parse supported caption formats into ``(start_seconds, text)`` pairs."""
 
     stripped = raw.lstrip()
     if stripped.startswith(("{", "[")):
-        return parse_json3(raw)
+        return parse_json3_segments(raw)
     if stripped.startswith("<"):
-        return parse_srv3(raw)
-    return parse_vtt(raw)
+        return parse_xml_caption_segments(raw)
+    return parse_vtt_segments(raw)
+
+
+def parse_caption(raw: str) -> str:
+    """Parse VTT, SRV3 XML, or JSON3 captions without trusting file suffixes."""
+
+    return "\n".join(text for _start, text in parse_caption_segments(raw))
+
+
+def format_caption_segments(segments: list[tuple[float | None, str]]) -> str:
+    """Render parsed captions as timestamped transcript lines."""
+
+    lines: list[str] = []
+    for start, text in segments:
+        marker = _format_caption_timestamp(start)
+        lines.append(f"{marker} {text}".strip() if marker else text)
+    return "\n".join(lines)
 
 
 def caption_track(info: dict) -> tuple[str, str, str] | None:
     """Choose an English manual/automatic caption track, then any supported track."""
 
-    supported = {"vtt", "srv3", "json3"}
+    supported = {"vtt", "srt", "srv1", "srv2", "srv3", "json3", "ttml"}
     groups = (
         ("manual", info.get("subtitles") or {}),
         ("automatic", info.get("automatic_captions") or {}),
@@ -112,7 +242,7 @@ def caption_url(info: dict) -> str | None:
 def fetch_caption(url: str) -> str:
     request = Request(url, headers={"User-Agent": "alex-hormozi-brain/1.0"})
     with urlopen(request, timeout=30) as response:
-        return parse_caption(response.read().decode("utf-8", errors="replace"))
+        return format_caption_segments(parse_caption_segments(response.read().decode("utf-8", errors="replace")))
 
 
 def fetch_missing_caption(entry: dict, channel_url: str, youtube_dir: Path, options: dict) -> tuple[str, dict]:

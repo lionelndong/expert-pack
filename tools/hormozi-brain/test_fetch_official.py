@@ -77,6 +77,26 @@ def test_caption_selection_checks_automatic_english_tracks():
     ) == "auto-en"
 
 
+def test_caption_selection_accepts_all_supported_youtube_formats():
+    track = FETCH.caption_track(
+        {
+            "subtitles": {"en": [{"url": "manual-en", "ext": "ttml"}]},
+            "automatic_captions": {},
+        }
+    )
+    assert track == ("manual-en", "ttml", "manual")
+
+
 def test_caption_parsers_support_srv3_and_json3():
     assert FETCH.parse_caption('<transcript><text start="0">Hello &amp; welcome</text><text start="1">Hello &amp; welcome</text></transcript>') == "Hello & welcome"
     assert FETCH.parse_caption(json.dumps({"events": [{"segs": [{"utf8": "Offer "}, {"utf8": "more value."}]}]})) == "Offer more value."
+
+
+def test_caption_segments_preserve_vtt_xml_and_json_timestamps():
+    vtt = "WEBVTT\n\n00:00:01.500 --> 00:00:03.000\nAdd value.\n"
+    ttml = '<tt:p xmlns:tt="http://www.w3.org/ns/ttml" begin="00:00:04.250">Price it right.</tt:p>'
+    json3 = json.dumps({"events": [{"tStartMs": 6500, "segs": [{"utf8": "Close."}]}]})
+    assert FETCH.parse_caption_segments(vtt) == [(1.5, "Add value.")]
+    assert FETCH.parse_caption_segments(ttml) == [(4.25, "Price it right.")]
+    assert FETCH.parse_caption_segments(json3) == [(6.5, "Close.")]
+    assert FETCH.format_caption_segments(FETCH.parse_caption_segments(vtt)) == "(0:01) Add value."
