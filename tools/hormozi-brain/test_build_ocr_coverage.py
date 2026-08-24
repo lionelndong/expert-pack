@@ -195,14 +195,16 @@ def test_ingest_audio_transcription_preserves_timestamped_provenance(tmp_path):
         ],
     }), encoding="utf-8")
     ledger = [{"record_id": "derived-audio-money-models", "status": "metadata_ready_pending_transcription"}]
+    audio_row = {"source_id": "audio-source", "path": str(audio), "relative_path": "library/Money Models.mp3", "hash": "sha256:audio"}
     result = BUILD.ingest_audio_transcriptions(
         transcription_root,
         tmp_path / "pack",
         ledger,
-        [{"source_id": "audio-source", "path": str(audio), "relative_path": "library/Money Models.mp3", "hash": "sha256:audio"}],
+        [audio_row],
     )
     assert result["status"] == "complete"
     assert result["transcribed"] == 1
+    assert audio_row["status"] == "included_audio_transcript"
     assert ledger[0]["status"] == "included_audio_transcript"
     output = tmp_path / "pack" / "audio" / "money-models-transcript.md"
     text = output.read_text(encoding="utf-8")
