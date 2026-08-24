@@ -230,6 +230,13 @@ def main() -> int:
     restricted_resolution = read_json(ROOT / "private-input/restricted-processing/restricted-source-resolution.json")
     skills_root = ROOT / "private-input/skills/alex-hormozi"
     inventory = [row for row in coverage.get("records", []) if row.get("kind") == "inventory_record"]
+    ledger_fields = (
+        "record_id", "status", "format", "title", "origin", "extraction_status",
+        "pack_membership", "rights_status", "sha256", "duplicate_group",
+    )
+    ledger_complete = len(inventory) == 428 and all(
+        all(field in row for field in ledger_fields) for row in inventory
+    )
     restricted = [row for row in inventory if row.get("status") == "quarantined_restricted_authorization_required"]
     catalog_videos = [video for channel in catalog.get("channels", []) for video in channel.get("videos", [])]
     catalog_statuses = {}
@@ -268,7 +275,7 @@ def main() -> int:
     packages = sorted(path for path in skills_root.iterdir() if path.is_dir()) if skills_root.is_dir() else []
     missing_skills = [path.name for path in packages if not (path / "SKILL.md").is_file()]
     checks = {
-        "inventory_ledger": check("pass" if len(inventory) == 428 and all(row.get("record_id") and row.get("status") for row in inventory) else "fail" if coverage else "pending", f"{len(inventory)} inventory records; every record has an ID and status"),
+        "inventory_ledger": check("pass" if ledger_complete else "fail" if coverage else "pending", f"{len(inventory)} inventory records; full provenance/lifecycle ledger fields present={ledger_complete}"),
         "supplied_transcripts": check("pass" if coverage.get("transcripts", {}).get("unique_videos") == 273 and coverage.get("transcripts", {}).get("duplicate_sections_removed") == 3 else "fail" if coverage else "pending", f"{coverage.get('transcripts', {}).get('unique_videos')} unique videos; {coverage.get('transcripts', {}).get('transcript_atoms')} timestamped atoms"),
         "official_channel_coverage": check("pass" if len(catalog_videos) == 517 and set(catalog_statuses) <= {"already_present", "caption_ingested", "openai_transcribed", "caption_unavailable_pending_openai_transcription"} else "pending" if not catalog else "fail", f"{len(catalog_videos)} catalog videos; statuses={catalog_statuses}"),
         "official_captionless_transcripts": check(

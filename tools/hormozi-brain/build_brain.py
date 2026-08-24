@@ -607,9 +607,14 @@ def make_ledger(manifest: dict, evidence: dict, skill_report: dict, container_re
                 "inspected_container_manifest_no_unique_knowledge",
             }:
                 status = str(container_row["status"])
+            source_path = source.get("relative_path") or source.get("path") or source_id
+            title = source.get("title") or source.get("name") or Path(str(source_path)).stem or source_id
+            origin = source.get("origin") or _source_origin(manifest, source)
             record = {
                 "record_id": source_id,
                 "kind": "inventory_record",
+                "title": str(title),
+                "origin": origin,
                 "relative_path": source.get("relative_path"),
                 "absolute_path": source.get("path"),
                 "format": source.get("type"),
@@ -619,6 +624,7 @@ def make_ledger(manifest: dict, evidence: dict, skill_report: dict, container_re
                 "status": status,
                 "evidence_action": evidence_row.get("action"),
                 "skills_action": skill_row.get("action"),
+                "extraction_status": _extraction_status(status),
                 "ocr_required_pages": evidence_row.get("ocr_required_pages", []),
                 "pack_membership": [name for name, row in (("evidence", evidence_row), ("curated-skills", skill_row)) if row.get("action") in {"extracted", "extracted_with_ocr_required_pages"}],
             }
@@ -652,6 +658,11 @@ def make_ledger(manifest: dict, evidence: dict, skill_report: dict, container_re
     }
     by_id = {str(record["record_id"]): record for record in records}
     for group in groups.values():
+        duplicate_ids = sorted(str(record["record_id"]) for record in group)
+        duplicate_status = "sha256_grouped" if len(group) > 1 else "sha256_unique"
+        for record in group:
+            record["duplicate_group"] = duplicate_ids
+            record["duplicate_group_status"] = duplicate_status
         explicit_targets = {
             canonical_id(str(record["duplicate_of"]), by_id)
             for record in group
@@ -671,7 +682,50 @@ def make_ledger(manifest: dict, evidence: dict, skill_report: dict, container_re
                 continue
             record["duplicate_of"] = winner_id
             record["status"] = "duplicate_by_sha256"
+    for record in records:
+        if not record.get("sha256"):
+            record["duplicate_group"] = [str(record["record_id"])]
+            record["duplicate_group_status"] = "hash_unavailable"
+        record["extraction_status"] = _extraction_status(str(record.get("status")))
     return records
+
+
+def _source_origin(manifest: dict, source: dict) -> str:
+    """Return a stable approved-root origin label without guessing ownership."""
+
+    source_path = source.get("path")
+    if source_path:
+        try:
+            resolved_source = Path(str(source_path)).resolve()
+            for root in manifest.get("approved_roots", []):
+                if not isinstance(root, dict) or not root.get("path"):
+                    continue
+                resolved_root = Path(str(root["path"])).resolve()
+                if resolved_source.is_relative_to(resolved_root):
+                    return str(root.get("root_id") or resolved_root)
+        except (OSError, RuntimeError, TypeError, ValueError):
+            pass
+    return str(source.get("origin") or "unmapped_origin")
+
+
+def _extraction_status(status: str) -> str:
+    """Normalize the ledger status into an explicit extraction lifecycle."""
+
+    if status == "quarantined_restricted_authorization_required":
+        return "quarantined_not_opened"
+    if status == "duplicate_by_sha256":
+        return "deduplicated_by_sha256"
+    if status in {"excluded_by_rights_or_scope", "pending_rights_or_quality_review"}:
+        return "not_extracted_pending_rights_or_quality"
+    if status == "approved_but_format_pending":
+        return "unsupported_not_extracted"
+    if status.startswith("inspected_"):
+        return "manifest_inspected"
+    if status.startswith("indexed_ocr") or status == "indexed_restricted_ocr":
+        return "ocr_indexed"
+    if status.startswith("indexed_"):
+        return "indexed"
+    return "unresolved"
 
 
 def copy_md(source: Path, destination: Path) -> int:
@@ -1305,6 +1359,11 @@ def main() -> int:
             if record.get("kind") == "inventory_record" and record.get("absolute_path") == ebook_result.get("path"):
                 record["status"] = "included_extracted"
                 record["pack_membership"] = sorted(set(record.get("pack_membership", [])) | {"ebook"})
+    # OCR, restricted, audio, and EPUB handoffs can update statuses after the
+    # initial ledger pass; keep the lifecycle field synchronized in the report.
+    for record in ledger:
+        if record.get("kind") == "inventory_record":
+            record["extraction_status"] = _extraction_status(str(record.get("status")))
     write_pack(output, ledger, transcript_report, skill_report, counts, extras)
     if preserved is not None:
         # The preservation staging directory contains private transcript text;

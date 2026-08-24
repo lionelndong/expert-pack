@@ -124,6 +124,12 @@ def test_make_ledger_preserves_evidence_duplicate_canonical():
     assert records["src-canonical"]["status"] == "indexed_evidence"
     assert records["src-copy"]["status"] == "duplicate_by_sha256"
     assert records["src-copy"]["duplicate_of"] == "src-canonical"
+    assert records["src-canonical"]["title"] == "canonical"
+    assert records["src-canonical"]["origin"] == "unmapped_origin"
+    assert records["src-canonical"]["extraction_status"] == "indexed"
+    assert records["src-copy"]["extraction_status"] == "deduplicated_by_sha256"
+    assert records["src-canonical"]["duplicate_group"] == ["src-canonical", "src-copy"]
+    assert records["src-copy"]["duplicate_group"] == ["src-canonical", "src-copy"]
 
 
 def test_inspect_containers_resolves_metadata_only_csv_and_zip(tmp_path):
