@@ -29,6 +29,8 @@ def main() -> int:
     quality = json.loads((pack / "meta/quality-report.json").read_text(encoding="utf-8"))
     estimate = json.loads((pack / "meta/embedding-estimate.json").read_text(encoding="utf-8"))
     catalog = json.loads((pack / "meta/official-channel-catalog.json").read_text(encoding="utf-8"))
+    skill_validation_path = pack / "meta/skill-validation.json"
+    skill_validation = json.loads(skill_validation_path.read_text(encoding="utf-8")) if skill_validation_path.is_file() else {}
     skills_root = ROOT / "private-input/skills/alex-hormozi"
     inventory = [row for row in coverage["records"] if row.get("kind") == "inventory_record"]
     restricted = [row for row in inventory if row.get("status") == "quarantined_restricted_authorization_required"]
@@ -43,7 +45,7 @@ def main() -> int:
         "inventory_ledger": check("pass" if len(inventory) == 428 and all(row.get("record_id") and row.get("status") for row in inventory) else "fail", f"{len(inventory)} inventory records; every record has an ID and status"),
         "supplied_transcripts": check("pass" if coverage.get("transcripts", {}).get("unique_videos") == 273 and coverage.get("transcripts", {}).get("duplicate_sections_removed") == 3 else "fail", f"{coverage.get('transcripts', {}).get('unique_videos')} unique videos; {coverage.get('transcripts', {}).get('transcript_atoms')} timestamped atoms"),
         "official_channel_coverage": check("pass" if len(catalog_videos) == 517 and set(catalog_statuses) <= {"already_present", "caption_ingested", "caption_unavailable_pending_openai_transcription"} else "fail", f"{len(catalog_videos)} catalog videos; statuses={catalog_statuses}"),
-        "paperclip_skills": check("pass" if len(packages) == 24 and not missing_skills and not coverage.get("skills", {}).get("invalid") else "fail", f"{len(packages)} packages; missing_skill_files={missing_skills}"),
+        "paperclip_skills": check("pass" if len(packages) == 24 and not missing_skills and not coverage.get("skills", {}).get("invalid") and skill_validation.get("overall_status") == "pass" else "fail", f"{len(packages)} packages; structural={not missing_skills}; workflow_validation={skill_validation.get('overall_status', 'missing')}"),
         "ocr_pages": check("pass" if ocr.get("requested_pages") == 442 and ocr.get("recovered_pages") == 442 else "pending", f"{ocr.get('recovered_pages', 0)}/{ocr.get('requested_pages', 0)} pages recovered; visual QA={ocr.get('visual_qa_status')}"),
         "restricted_sources": check("pending_external_authorization" if len(restricted) == 2 else "fail", f"{len(restricted)} restricted records remain quarantined"),
         "audio": check("pending_external_api" if any(row.get("status") == "metadata_ready_pending_transcription" for row in coverage.get("extras", {}).get("audio", [])) else "pass", "Timestamped audio transcription requires OPENAI_API_KEY"),

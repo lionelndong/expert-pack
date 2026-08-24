@@ -24,6 +24,7 @@ python tools/hormozi-brain/run_ocr_batch.py
 python tools/hormozi-brain/qa_ocr_results.py
 python tools/hormozi-brain/make_ocr_contact_sheet.py
 python tools/hormozi-brain/acceptance_audit.py
+python tools/hormozi-brain/validate_skills.py
 python tools/hormozi-brain/transcribe_audio.py --audio <approved-audio> --output private-input/audio-estimates/plan.json --estimate-only
 python tools/hormozi-brain/transcribe_audio.py --audio <approved-audio> --output private-input/transcripts/audio.json
 ```
