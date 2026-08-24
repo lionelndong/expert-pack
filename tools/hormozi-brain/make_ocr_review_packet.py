@@ -120,6 +120,10 @@ def build_packet(root: Path, output: Path) -> dict:
         manifest["visual_qa_status"] = "manual_review_complete"
     manifest["reviewed_count"] = sum(page.get("review_status") == "reviewed" for page in pages)
     manifest["pending_count"] = len(pages) - manifest["reviewed_count"]
+    manifest["decision_counts"] = {
+        decision: sum(page.get("review_decision") == decision for page in pages)
+        for decision in ("accept_ocr", "reocr_required", "graphic_or_blank", "unreadable")
+    }
     output.mkdir(parents=True, exist_ok=True)
     (output / "manual-review-manifest.json").write_text(
         json.dumps(manifest, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"

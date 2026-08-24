@@ -578,8 +578,39 @@ def integrate_ocr(output: Path, ocr_root: Path, ledger: list[dict[str, object]])
             result["visual_qa_status"] = json.loads(qa_summary_path.read_text(encoding="utf-8")).get("visual_qa_status", result["visual_qa_status"])
         except (OSError, json.JSONDecodeError):
             pass
+    review_manifest_path = ocr_root / "manual-review" / "manual-review-manifest.json"
+    if review_manifest_path.is_file():
+        try:
+            review_manifest = json.loads(review_manifest_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            review_manifest = {}
+        expected_review_pages = sum(
+            1
+            for report in reports
+            for item in report.get("results", [])
+            if isinstance(item, dict) and item.get("manual_review_required")
+        )
+        decision_counts = review_manifest.get("decision_counts") or {}
+        packet_complete = (
+            review_manifest.get("visual_qa_status") == "manual_review_complete"
+            and review_manifest.get("page_count") == expected_review_pages
+            and review_manifest.get("reviewed_count") == expected_review_pages
+            and review_manifest.get("pending_count") == 0
+            and not any(
+                int(decision_counts.get(decision, 0) or 0) > 0
+                for decision in ("reocr_required", "unreadable")
+            )
+        )
+        result["manual_review_pages"] = expected_review_pages
+        result["manual_review_decision_counts"] = decision_counts
+        if packet_complete:
+            result["visual_qa_status"] = "manual_review_complete"
     if result["requested_pages"] and result["recovered_pages"] == result["requested_pages"]:
-        result["status"] = "indexed_ocr_recovered_pending_manual_visual_qa"
+        result["status"] = (
+            "indexed_ocr_recovered_manual_visual_qa_complete"
+            if result["visual_qa_status"] == "manual_review_complete"
+            else "indexed_ocr_recovered_pending_manual_visual_qa"
+        )
     elif result["recovered_pages"]:
         result["status"] = "partially_recovered_ocr_pending"
 

@@ -54,16 +54,26 @@ def main() -> int:
     for video in catalog_videos:
         catalog_statuses[str(video.get("status"))] = catalog_statuses.get(str(video.get("status")), 0) + 1
     ocr = coverage.get("extras", {}).get("ocr", {})
-    expected_manual_review_pages = sum(
+    coverage_manual_review_pages = sum(
         len(item.get("pages", []))
         for item in ocr.get("low_confidence_pages", [])
         if isinstance(item, dict)
+    )
+    expected_manual_review_pages = (
+        review_packet.get("page_count")
+        if isinstance(review_packet.get("page_count"), int)
+        else coverage_manual_review_pages
     )
     packet_review_complete = (
         review_packet.get("visual_qa_status") == "manual_review_complete"
         and review_packet.get("page_count") == expected_manual_review_pages
         and review_packet.get("reviewed_count") == expected_manual_review_pages
         and review_packet.get("pending_count") == 0
+        and not any(
+            int(count or 0) > 0
+            for decision, count in (review_packet.get("decision_counts") or {}).items()
+            if decision in {"reocr_required", "unreadable"}
+        )
     )
     ocr_visual_qa_complete = ocr.get("visual_qa_status") in {"complete", "manual_review_complete"} or packet_review_complete
     packages = sorted(path for path in skills_root.iterdir() if path.is_dir()) if skills_root.is_dir() else []
