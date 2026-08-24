@@ -31,6 +31,8 @@ committed to this repository.
 - `tools/hormozi-brain/transcribe_official.py` — fail-closed audio-only
   transcription for captionless verified videos; media is temporary and never
   retained.
+- `tools/hormozi-brain/evaluate_decision_support.py` — evaluates real agent
+  response JSONL against the 20-case evidence/inference/conflict contract.
 - `tools/hormozi-brain/ocr_sources.py` and `transcribe_audio.py` — fail-closed
   adapters for remaining OCR/audio gaps.
 - `guides/agent-decision-support-contract.md` — required evidence-first rules
@@ -100,9 +102,19 @@ For a full rebuild followed by regenerated validation artifacts, use:
 ```
 
 This runs the pack builder, Paperclip skill validation, embedding-cost estimate,
-offline retrieval benchmark, company preflight, and final acceptance audit. It
-does not call the OpenAI API; embeddings and audio remain explicitly pending
-until the approved API key is injected.
+offline retrieval benchmark, decision-support contract preflight, company
+preflight, and final acceptance audit. It does not call the OpenAI API;
+embeddings, audio, and live-agent response evaluation remain explicitly
+pending until their approved inputs are supplied.
+
+After exercising a real company agent, export one JSON object per line with
+`id`, `disposition`, and `response`, then run:
+
+```powershell
+python tools/hormozi-brain/evaluate_decision_support.py `
+  --responses private-input/agent-evaluations/hormozi-responses.jsonl `
+  --require-responses
+```
 
 To transcribe a catalogued official video that has no captions, inject the
 approved API key and pass its catalog ID explicitly:

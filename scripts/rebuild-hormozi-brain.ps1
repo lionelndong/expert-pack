@@ -15,6 +15,7 @@ $steps = @(
     @{ Name = "skill validation"; Args = @("tools/hormozi-brain/validate_skills.py") },
     @{ Name = "embedding estimate"; Args = @("tools/hormozi-brain/estimate_embeddings.py", "--pack", "private-input/packs/alex-hormozi-brain-v1") },
     @{ Name = "quality benchmark"; Args = @("tools/hormozi-brain/quality_check.py", "--pack", "private-input/packs/alex-hormozi-brain-v1") },
+    @{ Name = "decision-support contract preflight"; Args = @("tools/hormozi-brain/evaluate_decision_support.py") },
     @{ Name = "company readiness"; Args = @("tools/hormozi-brain/company_readiness.py") },
     @{ Name = "acceptance audit"; Args = @("tools/hormozi-brain/acceptance_audit.py") }
 )

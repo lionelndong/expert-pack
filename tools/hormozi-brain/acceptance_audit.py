@@ -43,6 +43,7 @@ def main() -> int:
     readiness = read_json(readiness_path)
     skill_validation_path = pack / "meta/skill-validation.json"
     skill_validation = read_json(skill_validation_path)
+    decision_eval = read_json(pack / "meta/decision-support-evaluation.json")
     skills_root = ROOT / "private-input/skills/alex-hormozi"
     inventory = [row for row in coverage.get("records", []) if row.get("kind") == "inventory_record"]
     restricted = [row for row in inventory if row.get("status") == "quarantined_restricted_authorization_required"]
@@ -73,6 +74,10 @@ def main() -> int:
         "decision_scenarios": check(
             "pass" if quality.get("decision_scenarios", {}).get("cases") == 20 and quality.get("decision_scenarios", {}).get("passed") == 20 else "pending" if not quality else "fail",
             f"{quality.get('decision_scenarios', {}).get('passed', 0)}/{quality.get('decision_scenarios', {}).get('cases', 0)} structural scenarios; live_agent_response_evaluation={quality.get('decision_scenarios', {}).get('live_agent_response_evaluation', 'missing')}",
+        ),
+        "live_agent_evaluation": check(
+            "pass" if decision_eval.get("overall_status") == "pass" and decision_eval.get("expected_cases") == 20 and decision_eval.get("evaluated_cases") == 20 else "pending_agent_evaluation" if decision_eval.get("overall_status") == "pending_agent_responses" or not decision_eval else "fail",
+            f"status={decision_eval.get('overall_status', 'not_run')}; responses={decision_eval.get('response_records', 0)}/{decision_eval.get('expected_cases', 0)}; live_agent_response_evaluation={decision_eval.get('live_agent_response_evaluation', False)}",
         ),
         "semantic_retrieval": check("pending_external_api" if quality.get("semantic_embedding_evaluation") == "not_run" else "pass", "Requires a completed OpenAI vector index and semantic benchmark"),
         "company_deployment": check(
