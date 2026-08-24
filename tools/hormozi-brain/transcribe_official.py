@@ -135,7 +135,7 @@ def transcribe_video(entry: dict, output_pack: Path, model: str, chunk_seconds: 
     destination = output_pack / "youtube" / f"{slug(title, 'video')}-{video_id}-part-001.md"
     destination.parent.mkdir(parents=True, exist_ok=True)
     destination.write_text(transcript_markdown(section), encoding="utf-8", newline="\n")
-    return {
+    result = {
         "status": "openai_transcribed",
         "transcript_path": str(destination),
         "transcription_model": model,
@@ -168,7 +168,7 @@ def estimate_video(entry: dict, model: str, chunk_seconds: int, price_per_minute
         info = ydl.extract_info(str(entry["url"]), download=False) or {}
     duration = float(info.get("duration") or 0)
     chunks = plan_chunks(duration, chunk_seconds)
-    return {
+    result = {
         "video_id": str(entry["video_id"]),
         "title": str(info.get("title") or entry.get("title") or entry["video_id"]),
         "url": str(entry["url"]),
@@ -185,6 +185,7 @@ def estimate_video(entry: dict, model: str, chunk_seconds: int, price_per_minute
         "metadata_status": "available",
         "metadata_source": "yt-dlp",
     }
+    return result
 
 
 def estimate_from_metadata(entry: dict, metadata: dict, model: str, chunk_seconds: int, price_per_minute: float | None) -> dict:
@@ -194,7 +195,7 @@ def estimate_from_metadata(entry: dict, metadata: dict, model: str, chunk_second
     if duration <= 0:
         raise ValueError("metadata cache duration_seconds must be positive")
     chunks = plan_chunks(duration, chunk_seconds)
-    return {
+    result = {
         "video_id": str(entry["video_id"]),
         "title": str(metadata.get("title") or entry.get("title") or entry["video_id"]),
         "url": str(metadata.get("url") or entry["url"]),
@@ -212,6 +213,10 @@ def estimate_from_metadata(entry: dict, metadata: dict, model: str, chunk_second
         "metadata_status": "available",
         "metadata_source": str(metadata.get("metadata_source") or "approved metadata cache"),
     }
+    for key in ("transcript_available", "transcript_check_method"):
+        if key in metadata:
+            result[key] = metadata[key]
+    return result
 
 
 def unavailable_estimate(entry: dict, model: str, chunk_seconds: int, price_per_minute: float | None, error: Exception) -> dict:
