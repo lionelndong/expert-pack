@@ -28,6 +28,9 @@ committed to this repository.
   the EPUB, records audio metadata, and mirrors the 24 executable skills.
 - `tools/hormozi-brain/fetch_official.py` — opt-in metadata/subtitle-only
   refresh for explicitly verified official channels.
+- `tools/hormozi-brain/transcribe_official.py` — fail-closed audio-only
+  transcription for captionless verified videos; media is temporary and never
+  retained.
 - `tools/hormozi-brain/ocr_sources.py` and `transcribe_audio.py` — fail-closed
   adapters for remaining OCR/audio gaps.
 - `guides/agent-decision-support-contract.md` — required evidence-first rules
@@ -100,3 +103,17 @@ This runs the pack builder, Paperclip skill validation, embedding-cost estimate,
 offline retrieval benchmark, company preflight, and final acceptance audit. It
 does not call the OpenAI API; embeddings and audio remain explicitly pending
 until the approved API key is injected.
+
+To transcribe a catalogued official video that has no captions, inject the
+approved API key and pass its catalog ID explicitly:
+
+```powershell
+python tools/hormozi-brain/transcribe_official.py `
+  --video-id OVhNSzFSoZs `
+  --catalog private-input/packs/alex-hormozi-brain-v1/meta/official-channel-catalog.json `
+  --output private-input/packs/alex-hormozi-brain-v1
+```
+
+The command downloads only temporary best-audio, sends chunk files to the
+existing OpenAI transcription endpoint, writes timestamped evidence, updates
+the catalog, and removes all temporary media on exit.
