@@ -46,6 +46,7 @@ def main() -> int:
     skill_validation = read_json(skill_validation_path)
     decision_eval = read_json(pack / "meta/decision-support-evaluation.json")
     review_packet = read_json(ROOT / "private-input/ocr-results/manual-review/manual-review-manifest.json")
+    restricted_resolution = read_json(ROOT / "private-input/restricted-processing/restricted-source-resolution.json")
     skills_root = ROOT / "private-input/skills/alex-hormozi"
     inventory = [row for row in coverage.get("records", []) if row.get("kind") == "inventory_record"]
     restricted = [row for row in inventory if row.get("status") == "quarantined_restricted_authorization_required"]
@@ -100,7 +101,10 @@ def main() -> int:
             ) else "fail",
             f"{containers.get('source_count', 0)} CSV/ZIP records inspected; unique knowledge ingested={containers.get('unique_knowledge_ingested', True)}",
         ),
-        "restricted_sources": check("pending_external_authorization" if len(restricted) == 2 else "fail", f"{len(restricted)} restricted records remain quarantined"),
+        "restricted_sources": check(
+            "pending_external_authorization" if len(restricted) == 2 else "fail",
+            f"{len(restricted)} restricted records remain quarantined; resolution_report={restricted_resolution.get('status', 'missing')}",
+        ),
         "restricted_workflow": check(
             "pass" if (ROOT / "tools/hormozi-brain/process_restricted.py").is_file() and (ROOT / "config/source-intake/restricted-authorization.schema.json").is_file() else "fail",
             "fail-closed authorization, hash/deduplication, and optional OCR workflow is present",
