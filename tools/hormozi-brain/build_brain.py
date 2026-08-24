@@ -283,6 +283,9 @@ def merge_preserved_official(output: Path, preserved: Path | None, ledger: list[
             videos = [video for channel in catalog.get("channels", []) for video in channel.get("videos", [])]
             transcript_report["official_channel_video_count"] = len(videos)
             transcript_report["official_catalog_status_counts"] = dict(Counter(str(video.get("status", "unknown")) for video in videos))
+            transcript_report["official_catalog_generated_at"] = catalog.get("generated_at")
+            transcript_report["official_catalog_verification_method"] = catalog.get("verification_method")
+            transcript_report["official_catalog_media_downloaded"] = catalog.get("media_downloaded")
         except (OSError, json.JSONDecodeError, TypeError):
             transcript_report["official_catalog_status_counts"] = {"catalog_read_error": 1}
     transcript_report["official_caption_videos"] = added

@@ -242,6 +242,13 @@ def main() -> int:
     catalog_statuses = {}
     for video in catalog_videos:
         catalog_statuses[str(video.get("status"))] = catalog_statuses.get(str(video.get("status")), 0) + 1
+    catalog_provenance_complete = bool(
+        catalog.get("generated_at")
+        and catalog.get("verification_method")
+        and catalog.get("media_downloaded") is False
+        and catalog.get("video_count") == len(catalog_videos)
+        and catalog.get("verified_channel_urls")
+    )
     captionless_videos = [
         video for video in catalog_videos
         if video.get("status") == "caption_unavailable_pending_openai_transcription"
@@ -277,7 +284,17 @@ def main() -> int:
     checks = {
         "inventory_ledger": check("pass" if ledger_complete else "fail" if coverage else "pending", f"{len(inventory)} inventory records; full provenance/lifecycle ledger fields present={ledger_complete}"),
         "supplied_transcripts": check("pass" if coverage.get("transcripts", {}).get("unique_videos") == 273 and coverage.get("transcripts", {}).get("duplicate_sections_removed") == 3 else "fail" if coverage else "pending", f"{coverage.get('transcripts', {}).get('unique_videos')} unique videos; {coverage.get('transcripts', {}).get('transcript_atoms')} timestamped atoms"),
-        "official_channel_coverage": check("pass" if len(catalog_videos) == 517 and set(catalog_statuses) <= {"already_present", "caption_ingested", "openai_transcribed", "caption_unavailable_pending_openai_transcription"} else "pending" if not catalog else "fail", f"{len(catalog_videos)} catalog videos; statuses={catalog_statuses}"),
+        "official_channel_coverage": check(
+            "pass"
+            if catalog_videos
+            and set(catalog_statuses) <= {"already_present", "caption_ingested", "openai_transcribed", "caption_unavailable_pending_openai_transcription"}
+            and catalog_provenance_complete
+            and coverage.get("transcripts", {}).get("official_catalog_generated_at") == catalog.get("generated_at")
+            and coverage.get("transcripts", {}).get("official_catalog_verification_method") == catalog.get("verification_method")
+            and coverage.get("transcripts", {}).get("official_catalog_media_downloaded") is False
+            else "pending_external_metadata" if catalog_videos else "pending" if not catalog else "fail",
+            f"{len(catalog_videos)} catalog videos; statuses={catalog_statuses}; refreshed_at={coverage.get('transcripts', {}).get('official_catalog_generated_at')}",
+        ),
         "official_captionless_transcripts": check(
             "pass" if not captionless_videos else "pending_external_api" if not os.environ.get("OPENAI_API_KEY") else "pending_transcription",
             f"{len(captionless_videos)} official videos remain without a transcript",

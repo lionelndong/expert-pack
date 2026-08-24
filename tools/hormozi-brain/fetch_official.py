@@ -164,7 +164,16 @@ def main() -> int:
                         video_id, updated = future.result()
                         row_by_id[video_id].update(updated)
             catalog.append(channel_record)
-    report = {"verified_channel_urls": args.channel_url, "video_count": sum(len(row.get("videos", [])) for row in catalog), "channels": catalog}
+    report = {
+        "report_version": "1.1",
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "verification_method": "yt-dlp metadata-only enumeration from explicitly supplied verified channel URL(s)",
+        "media_downloaded": False,
+        "captions_requested": bool(args.fetch_captions),
+        "verified_channel_urls": args.channel_url,
+        "video_count": sum(len(row.get("videos", [])) for row in catalog),
+        "channels": catalog,
+    }
     report_path = args.output / "meta" / "official-channel-catalog.json"
     report_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.write_text(json.dumps(report, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
