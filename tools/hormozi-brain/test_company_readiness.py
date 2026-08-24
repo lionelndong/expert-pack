@@ -45,5 +45,38 @@ embedding:
     assert {"mcp_secret", "openai_secret", "company_gateway"} <= set(report["pending"])
     assert report["checks"]["audit_log"]["status"] == "pass"
     assert report["checks"]["no_inline_pack_keys"]["status"] == "pass"
+    assert report["checks"]["no_inline_embedding_keys"]["status"] == "pass"
     assert "OPENAI_API_KEY" not in stdout
     assert "EP_MCP_KEY_ALEX_HORMOZI_BRAIN" not in stdout
+
+
+def test_preflight_rejects_inline_embedding_credentials(tmp_path, monkeypatch):
+    config = tmp_path / "company.yaml"
+    config.write_text(
+        """
+server:
+  host: 0.0.0.0
+  mcp_allowed_hosts: [hormozi-brain.internal]
+  mcp_allowed_origins: [https://agents.internal]
+  query_log_path: /var/log/ep-mcp/hormozi.jsonl
+  rate_limit:
+    enabled: true
+    requests_per_minute: 120
+    burst: 20
+packs:
+  - slug: alex-hormozi-brain
+    path: private-input/packs/alex-hormozi-brain-v1
+embedding:
+  provider: openai
+  model: text-embedding-3-small
+  api_key: accidentally-inline-secret
+""",
+        encoding="utf-8",
+    )
+    output = tmp_path / "readiness.json"
+    monkeypatch.setattr(sys, "argv", ["company_readiness.py", "--config", str(config), "--output", str(output)])
+
+    assert READINESS.main() == 1
+    report = json.loads(output.read_text(encoding="utf-8"))
+    assert report["checks"]["no_inline_embedding_keys"]["status"] == "fail"
+    assert "no_inline_embedding_keys" in report["failures"]
