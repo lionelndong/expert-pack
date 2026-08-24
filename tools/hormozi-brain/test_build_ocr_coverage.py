@@ -28,7 +28,7 @@ def test_integrate_ocr_promotes_canonical_coverage_after_review(tmp_path):
     }
     (ocr_root / "reports" / "src-test.json").write_text(json.dumps(report), encoding="utf-8")
     (ocr_root / "atoms" / "src-test-page-0001.md").write_text(
-        "---\nsource_id: src-test\nsource_page: 1\n---\n# OCR page\n",
+        "---\nsource_id: src-test\nsource_page: 1\ncontent_hash: sha256:stale\nconfidence: manually_transcribed\n---\n# OCR page\n",
         encoding="utf-8",
     )
     (ocr_root / "manual-review" / "manual-review-manifest.json").write_text(json.dumps({
@@ -42,7 +42,11 @@ def test_integrate_ocr_promotes_canonical_coverage_after_review(tmp_path):
     assert result["status"] == "indexed_ocr_recovered_manual_visual_qa_complete"
     assert result["visual_qa_status"] == "manual_review_complete"
     assert result["manual_review_pages"] == 1
-    assert (tmp_path / "pack" / "ocr" / "src-test-page-0001.md").is_file()
+    output = tmp_path / "pack" / "ocr" / "src-test-page-0001.md"
+    assert output.is_file()
+    normalized = output.read_text(encoding="utf-8")
+    assert "confidence: expert-verified" in normalized
+    assert "content_hash: sha256:stale" not in normalized
 
 
 def test_coverage_categories_are_explicit_and_do_not_hide_pending_sources(tmp_path):

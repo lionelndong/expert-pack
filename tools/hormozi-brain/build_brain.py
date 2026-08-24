@@ -676,6 +676,25 @@ def copy_md(source: Path, destination: Path) -> int:
     return count
 
 
+def normalize_ocr_atom(text: str) -> str:
+    """Reconcile OCR frontmatter with reviewed body text before mirroring."""
+
+    parts = text.split("---", 2)
+    if len(parts) != 3:
+        return text
+    try:
+        frontmatter = yaml.safe_load(parts[1]) or {}
+    except yaml.YAMLError:
+        return text
+    if not isinstance(frontmatter, dict):
+        return text
+    body = parts[2].lstrip("\n")
+    frontmatter["content_hash"] = sha256_text(body)
+    if frontmatter.get("confidence") == "manually_transcribed":
+        frontmatter["confidence"] = "expert-verified"
+    return "---\n" + yaml.safe_dump(frontmatter, sort_keys=False, allow_unicode=True).strip() + "\n---\n" + body
+
+
 def integrate_ocr(output: Path, ocr_root: Path, ledger: list[dict[str, object]]) -> dict[str, object]:
     """Copy rendered OCR atoms and reconcile page status with the ledger."""
     result: dict[str, object] = {
@@ -776,7 +795,7 @@ def integrate_ocr(output: Path, ocr_root: Path, ledger: list[dict[str, object]])
         destination = target / atom.name
         if classification != "true_blank_page":
             destination.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(atom, destination)
+            destination.write_text(normalize_ocr_atom(text), encoding="utf-8", newline="\n")
         else:
             result["true_blank_pages"].append({"source_id": source_id, "page": page})
         copied_by_source[source_id].append({"path": destination, "page": page, "title": atom.stem})
