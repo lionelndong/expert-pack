@@ -55,6 +55,35 @@ def find_audio_file(directory: Path, video_id: str) -> Path:
     return candidates[0]
 
 
+def catalog_videos(catalog: dict) -> dict[str, dict]:
+    """Flatten the catalog while inheriting verified channel provenance.
+
+    Channel identity is stored once at the catalog level by the enumerator, but
+    every downstream video record must remain self-describing for MCP citations
+    and future refreshes.  A per-video value wins when present; otherwise the
+    verified channel record supplies it.
+    """
+
+    videos: dict[str, dict] = {}
+    for channel in catalog.get("channels", []):
+        if not isinstance(channel, dict):
+            continue
+        channel_metadata = {
+            "channel_url": channel.get("channel_url"),
+            "channel_id": channel.get("channel_id"),
+            "channel": channel.get("channel"),
+        }
+        for raw_video in channel.get("videos", []):
+            if not isinstance(raw_video, dict) or not raw_video.get("video_id"):
+                continue
+            video = dict(raw_video)
+            for key, value in channel_metadata.items():
+                if value and not video.get(key):
+                    video[key] = value
+            videos[str(video["video_id"])] = video
+    return videos
+
+
 def transcribe_video(entry: dict, output_pack: Path, model: str, chunk_seconds: int, retries: int) -> dict:
     if not os.environ.get("OPENAI_API_KEY"):
         raise RuntimeError("OPENAI_API_KEY is required; no media was opened or downloaded")
@@ -81,6 +110,9 @@ def transcribe_video(entry: dict, output_pack: Path, model: str, chunk_seconds: 
         info = ydl.extract_info(url, download=False) or {}
     title = str(info.get("title") or title)
     channel_url = str(entry.get("channel_url") or info.get("channel_url") or "verified-official-channel")
+    channel_id = str(entry.get("channel_id") or info.get("channel_id") or "")
+    channel = str(entry.get("channel") or info.get("channel") or info.get("uploader") or "")
+    published_at = entry.get("published_at") or info.get("release_timestamp") or info.get("upload_date")
 
     client = OpenAI()
     merged_segments: list[dict] = []
@@ -126,6 +158,10 @@ def transcribe_video(entry: dict, output_pack: Path, model: str, chunk_seconds: 
         "title": title,
         "url": url,
         "video_id": video_id,
+        "channel": channel or None,
+        "channel_id": channel_id or None,
+        "channel_url": channel_url,
+        "published_at": published_at,
         "transcript": transcript,
         "source_file": f"official:{channel_url} (OpenAI {model}; audio-only temporary extraction)",
         "source_line_start": 1,
@@ -145,6 +181,10 @@ def transcribe_video(entry: dict, output_pack: Path, model: str, chunk_seconds: 
         "transcribed_at": datetime.now(timezone.utc).isoformat(),
         "audio_retained": False,
         "timestamped_segments": len(merged_segments),
+        "channel": channel or None,
+        "channel_id": channel_id or None,
+        "channel_url": channel_url,
+        "published_at": published_at,
     }
     return result
 
@@ -176,6 +216,10 @@ def estimate_video(entry: dict, model: str, chunk_seconds: int, price_per_minute
         "video_id": str(entry["video_id"]),
         "title": str(info.get("title") or entry.get("title") or entry["video_id"]),
         "url": str(entry["url"]),
+        "channel": entry.get("channel") or info.get("channel") or info.get("uploader"),
+        "channel_id": entry.get("channel_id") or info.get("channel_id"),
+        "channel_url": entry.get("channel_url") or info.get("channel_url"),
+        "published_at": entry.get("published_at") or info.get("release_timestamp") or info.get("upload_date"),
         "duration_seconds": duration,
         "estimated_audio_minutes": round(duration / 60, 3),
         "estimated_chunks": len(chunks),
@@ -203,6 +247,10 @@ def estimate_from_metadata(entry: dict, metadata: dict, model: str, chunk_second
         "video_id": str(entry["video_id"]),
         "title": str(metadata.get("title") or entry.get("title") or entry["video_id"]),
         "url": str(metadata.get("url") or entry["url"]),
+        "channel": entry.get("channel"),
+        "channel_id": entry.get("channel_id"),
+        "channel_url": entry.get("channel_url"),
+        "published_at": entry.get("published_at") or metadata.get("published_at") or metadata.get("upload_date"),
         "duration_seconds": duration,
         "duration_iso": metadata.get("duration_iso"),
         "estimated_audio_minutes": round(duration / 60, 3),
@@ -230,6 +278,10 @@ def unavailable_estimate(entry: dict, model: str, chunk_seconds: int, price_per_
         "video_id": str(entry["video_id"]),
         "title": str(entry.get("title") or entry["video_id"]),
         "url": str(entry["url"]),
+        "channel": entry.get("channel"),
+        "channel_id": entry.get("channel_id"),
+        "channel_url": entry.get("channel_url"),
+        "published_at": entry.get("published_at"),
         "duration_seconds": None,
         "estimated_audio_minutes": None,
         "estimated_chunks": None,
@@ -259,7 +311,7 @@ def main() -> int:
     if not args.catalog.is_file():
         raise SystemExit(f"Official-channel catalog not found: {args.catalog}")
     catalog = json.loads(args.catalog.read_text(encoding="utf-8"))
-    videos = {str(video.get("video_id")): video for channel in catalog.get("channels", []) for video in channel.get("videos", [])}
+    videos = catalog_videos(catalog)
     metadata_cache: dict[str, dict] = {}
     if args.metadata_cache:
         try:

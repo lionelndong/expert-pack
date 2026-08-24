@@ -18,6 +18,24 @@ def test_segment_lines_preserves_timestamp_locators():
     assert OFFICIAL.segment_lines([{"start": 61.2, "text": "Offer more value."}], "fallback") == "[00:01:01] Offer more value."
 
 
+def test_catalog_videos_inherits_verified_channel_provenance():
+    videos = OFFICIAL.catalog_videos(
+        {
+            "channels": [
+                {
+                    "channel_url": "https://www.youtube.com/@AlexHormozi/videos",
+                    "channel_id": "UC-official",
+                    "channel": "Alex Hormozi",
+                    "videos": [{"video_id": "ABCDEFGHIJK", "url": "https://youtu.be/ABCDEFGHIJK"}],
+                }
+            ]
+        }
+    )
+    assert videos["ABCDEFGHIJK"]["channel_url"] == "https://www.youtube.com/@AlexHormozi/videos"
+    assert videos["ABCDEFGHIJK"]["channel_id"] == "UC-official"
+    assert videos["ABCDEFGHIJK"]["channel"] == "Alex Hormozi"
+
+
 def test_missing_key_fails_before_media_download(tmp_path, monkeypatch):
     catalog = tmp_path / "catalog.json"
     catalog.write_text(
@@ -103,7 +121,13 @@ def test_transcribe_video_returns_catalog_update_after_success(tmp_path, monkeyp
 
         def extract_info(self, _url, download=False):
             assert download is False
-            return {"title": "Example", "channel_url": "https://youtube.com/@AlexHormozi"}
+            return {
+                "title": "Example",
+                "channel_url": "https://youtube.com/@AlexHormozi",
+                "channel_id": "UC-official",
+                "channel": "Alex Hormozi",
+                "upload_date": "20260102",
+            }
 
         def download(self, _urls):
             output_template = str(self.options["outtmpl"])
@@ -127,7 +151,14 @@ def test_transcribe_video_returns_catalog_update_after_success(tmp_path, monkeyp
 
     monkeypatch.setattr("subprocess.run", fake_run)
     result = OFFICIAL.transcribe_video(
-        {"video_id": "ABCDEFGHIJK", "url": "https://youtu.be/ABCDEFGHIJK", "title": "Fallback"},
+        {
+            "video_id": "ABCDEFGHIJK",
+            "url": "https://youtu.be/ABCDEFGHIJK",
+            "title": "Fallback",
+            "channel_url": "https://www.youtube.com/@AlexHormozi/videos",
+            "channel_id": "UC-official",
+            "channel": "Alex Hormozi",
+        },
         tmp_path,
         "test-model",
         600,
@@ -135,4 +166,11 @@ def test_transcribe_video_returns_catalog_update_after_success(tmp_path, monkeyp
     )
     assert result["status"] == "openai_transcribed"
     assert result["audio_retained"] is False
+    assert result["channel"] == "Alex Hormozi"
+    assert result["channel_id"] == "UC-official"
+    assert result["channel_url"] == "https://www.youtube.com/@AlexHormozi/videos"
+    assert result["published_at"] == "20260102"
     assert Path(result["transcript_path"]).is_file()
+    transcript = Path(result["transcript_path"]).read_text(encoding="utf-8")
+    assert "- Channel: Alex Hormozi" in transcript
+    assert "- Publication metadata: `20260102`" in transcript

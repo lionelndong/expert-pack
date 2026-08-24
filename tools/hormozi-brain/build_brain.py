@@ -127,17 +127,28 @@ def transcript_markdown(section: dict[str, object]) -> str:
     observed = [timestamp_seconds(line) for line in transcript.splitlines()]
     observed = [value for value in observed if value is not None]
     part_label = f" — part {section.get('part_index')}" if section.get("part_index") else ""
+    channel_metadata: list[str] = []
+    if section.get("channel"):
+        channel_metadata.append(f"- Channel: {section['channel']}")
+    if section.get("channel_id"):
+        channel_metadata.append(f"- Channel ID: `{section['channel_id']}`")
+    if section.get("channel_url"):
+        channel_metadata.append(f"- Channel URL: {section['channel_url']}")
+    if section.get("published_at"):
+        channel_metadata.append(f"- Publication metadata: `{section['published_at']}`")
+    channel_metadata_block = ("\n".join(channel_metadata) + "\n") if channel_metadata else ""
     body = (
         f"# {title}{part_label}\n\n"
         "> Evidence boundary: transcript-derived source material for decision support; "
         "not a current statement, endorsement, or impersonation of Alex Hormozi.\n\n"
         "## Provenance\n\n"
         f"- Video ID: `{video_id}`\n- YouTube URL: {section['url']}\n"
-        f"- Transcript file: `{section['source_file']}`\n"
-        f"- Source lines: {section['source_line_start']}-{section['source_line_end']}\n"
-        f"- Transcript part: {section.get('part_index', 1)}/{section.get('part_count', 1)}\n"
-        f"- Timestamp range: {section.get('start_timestamp')}s-{section.get('end_timestamp')}s\n"
-        f"- Latest observed timestamp: {max(observed) if observed else None}s\n\n"
+        + channel_metadata_block
+        + f"- Transcript file: `{section['source_file']}`\n"
+        + f"- Source lines: {section['source_line_start']}-{section['source_line_end']}\n"
+        + f"- Transcript part: {section.get('part_index', 1)}/{section.get('part_count', 1)}\n"
+        + f"- Timestamp range: {section.get('start_timestamp')}s-{section.get('end_timestamp')}s\n"
+        + f"- Latest observed timestamp: {max(observed) if observed else None}s\n\n"
         "## Transcript\n\n```text\n" + transcript + "\n```\n"
     )
     frontmatter = {

@@ -81,6 +81,10 @@ def fetch_missing_caption(entry: dict, channel_url: str, youtube_dir: Path, opti
             "title": entry.get("title") or video_id,
             "url": entry["url"],
             "video_id": video_id,
+            "channel": info.get("channel") or info.get("uploader"),
+            "channel_id": info.get("channel_id"),
+            "channel_url": channel_url,
+            "published_at": info.get("release_timestamp") or info.get("upload_date"),
             "transcript": text,
             "source_file": f"official:{channel_url}",
             "source_line_start": 1,
@@ -140,7 +144,15 @@ def main() -> int:
                 video_id = str(entry.get("id") or "")
                 if not video_id:
                     continue
-                row = {"video_id": video_id, "title": entry.get("title"), "url": entry.get("webpage_url") or f"https://www.youtube.com/watch?v={video_id}", "status": "already_present" if video_id in existing_ids else "metadata_only"}
+                row = {
+                    "video_id": video_id,
+                    "title": entry.get("title"),
+                    "url": entry.get("webpage_url") or f"https://www.youtube.com/watch?v={video_id}",
+                    "channel": channel_record.get("channel"),
+                    "channel_id": channel_record.get("channel_id"),
+                    "channel_url": channel_url,
+                    "status": "already_present" if video_id in existing_ids else "metadata_only",
+                }
                 if args.fetch_captions and video_id not in existing_ids:
                     pending.append(row)
                 channel_record["videos"].append(row)
