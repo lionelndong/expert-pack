@@ -102,8 +102,9 @@ For a full rebuild followed by regenerated validation artifacts, use:
 ```
 
 This runs the pack builder, Paperclip skill validation, embedding-cost estimate,
-offline retrieval benchmark, decision-support contract preflight, company
-preflight, and final acceptance audit. It does not call the OpenAI API;
+official-channel transcription estimate, offline retrieval benchmark,
+decision-support contract preflight, company preflight, and final acceptance
+audit. It does not call the OpenAI API;
 embeddings, audio, and live-agent response evaluation remain explicitly
 pending until their approved inputs are supplied.
 
