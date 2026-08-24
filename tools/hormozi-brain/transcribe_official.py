@@ -185,6 +185,27 @@ def estimate_video(entry: dict, model: str, chunk_seconds: int, price_per_minute
     }
 
 
+def unavailable_estimate(entry: dict, model: str, chunk_seconds: int, price_per_minute: float | None, error: Exception) -> dict:
+    """Record a metadata-only failure without downloading media or calling an API."""
+
+    return {
+        "video_id": str(entry["video_id"]),
+        "title": str(entry.get("title") or entry["video_id"]),
+        "url": str(entry["url"]),
+        "duration_seconds": None,
+        "estimated_audio_minutes": None,
+        "estimated_chunks": None,
+        "chunk_seconds": chunk_seconds,
+        "model": model,
+        "price_per_minute_usd": price_per_minute,
+        "projected_transcription_cost_usd": None,
+        "media_downloaded": False,
+        "api_called": False,
+        "metadata_status": "unavailable_pending_transcription",
+        "error_type": type(error).__name__,
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--video-id", action="append", required=True, help="Catalog video ID; repeat for multiple videos")
@@ -205,7 +226,10 @@ def main() -> int:
         if video_id not in videos:
             raise SystemExit(f"Video ID {video_id} is not present in the verified official catalog")
         if args.estimate_only:
-            estimates.append(estimate_video(videos[video_id], args.model, args.chunk_seconds, args.price_per_minute_usd))
+            try:
+                estimates.append(estimate_video(videos[video_id], args.model, args.chunk_seconds, args.price_per_minute_usd))
+            except Exception as error:
+                estimates.append(unavailable_estimate(videos[video_id], args.model, args.chunk_seconds, args.price_per_minute_usd, error))
             continue
         if not os.environ.get("OPENAI_API_KEY"):
             raise SystemExit("OPENAI_API_KEY is required; no media was opened or downloaded")
@@ -215,7 +239,18 @@ def main() -> int:
     if args.estimate_only:
         report_path = args.output / "meta" / "official-transcription-estimate.json"
         report_path.parent.mkdir(parents=True, exist_ok=True)
-        report = {"report_version": "1.0", "model": args.model, "videos": estimates, "total_duration_seconds": sum(item["duration_seconds"] for item in estimates), "total_estimated_chunks": sum(item["estimated_chunks"] for item in estimates), "api_called": False, "media_downloaded": False, "output": str(report_path)}
+        metadata_available = all(item.get("duration_seconds") is not None and item.get("estimated_chunks") is not None for item in estimates)
+        report = {
+            "report_version": "1.0",
+            "model": args.model,
+            "videos": estimates,
+            "metadata_available": metadata_available,
+            "total_duration_seconds": sum(item["duration_seconds"] for item in estimates) if metadata_available else None,
+            "total_estimated_chunks": sum(item["estimated_chunks"] for item in estimates) if metadata_available else None,
+            "api_called": False,
+            "media_downloaded": False,
+            "output": str(report_path),
+        }
         report_path.write_text(json.dumps(report, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
         print(json.dumps({"status": "estimate_only", "videos": len(estimates), "output": str(report_path)}, indent=2))
     return 0

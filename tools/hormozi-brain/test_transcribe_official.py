@@ -51,3 +51,18 @@ def test_metadata_estimate_does_not_download_media(monkeypatch):
     assert estimate["media_downloaded"] is False
     assert estimate["api_called"] is False
     assert estimate["projected_transcription_cost_usd"] == round(125 / 60 * 0.01, 6)
+
+
+def test_unavailable_estimate_is_explicit_and_fail_closed():
+    estimate = OFFICIAL.unavailable_estimate(
+        {"video_id": "ABCDEFGHIJK", "title": "Example", "url": "https://youtu.be/ABCDEFGHIJK"},
+        "test-model",
+        600,
+        None,
+        RuntimeError("bot challenge"),
+    )
+    assert estimate["metadata_status"] == "unavailable_pending_transcription"
+    assert estimate["duration_seconds"] is None
+    assert estimate["estimated_chunks"] is None
+    assert estimate["media_downloaded"] is False
+    assert estimate["api_called"] is False
