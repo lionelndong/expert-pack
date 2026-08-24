@@ -78,7 +78,8 @@ When the `alex-hormozi-brain` pack is loaded, the MCP server exposes these
 agent-first tools in addition to the generic ExpertPack tools:
 
 - `search_hormozi_brain` — filtered hybrid retrieval with source ID, title,
-  confidence, file provenance, and normalized timestamp/page/chapter locators.
+  confidence, file provenance, normalized timestamp/page/chapter locators, and
+  `citation_url` moment links for timestamped YouTube evidence.
 - `get_hormozi_source` — load the complete cited atom by source ID or
   pack-relative path, with optional reconstruction metadata.
 - `get_hormozi_skill` — return one validated Paperclip skill entrypoint and its
