@@ -55,6 +55,7 @@ def main() -> int:
     for video in catalog_videos:
         catalog_statuses[str(video.get("status"))] = catalog_statuses.get(str(video.get("status")), 0) + 1
     ocr = coverage.get("extras", {}).get("ocr", {})
+    restricted_pack = coverage.get("extras", {}).get("restricted", {})
     coverage_manual_review_pages = sum(
         len(item.get("pages", []))
         for item in ocr.get("low_confidence_pages", [])
@@ -102,8 +103,12 @@ def main() -> int:
             f"{containers.get('source_count', 0)} CSV/ZIP records inspected; unique knowledge ingested={containers.get('unique_knowledge_ingested', True)}",
         ),
         "restricted_sources": check(
-            "pending_external_authorization" if len(restricted) == 2 else "fail",
-            f"{len(restricted)} restricted records remain quarantined; resolution_report={restricted_resolution.get('status', 'missing')}",
+            "pass" if len(restricted) == 0 and restricted_resolution.get("status") == "authorized_processed" and restricted_pack.get("status") == "authorized_processed" else "pending_external_authorization" if len(restricted) == 2 and restricted_resolution.get("status", "missing") in {"missing", "pending_external_authorization"} else "fail",
+            f"{len(restricted)} restricted records remain quarantined; resolution_report={restricted_resolution.get('status', 'missing')}; pack_status={restricted_pack.get('status', 'missing')}",
+        ),
+        "restricted_ocr": check(
+            "pass" if restricted_pack.get("status") == "authorized_processed" and restricted_pack.get("ocr_requested") and int(restricted_pack.get("ocr_atoms", 0) or 0) > 0 else "pending_external_ocr" if restricted_pack.get("status") in {"authorized_pending_ocr", "authorized_processed"} and restricted_pack.get("ocr_requested") else "pending_external_authorization" if len(restricted) == 2 else "fail",
+            f"status={restricted_pack.get('status', 'missing')}; ocr_requested={restricted_pack.get('ocr_requested', False)}; atoms={restricted_pack.get('ocr_atoms', 0)}",
         ),
         "restricted_workflow": check(
             "pass" if (ROOT / "tools/hormozi-brain/process_restricted.py").is_file() and (ROOT / "config/source-intake/restricted-authorization.schema.json").is_file() else "fail",

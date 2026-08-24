@@ -33,6 +33,7 @@ DEFAULT_MANIFEST = ROOT / "private-input/inventory/hormozi-source-manifest.json"
 DEFAULT_EVIDENCE = ROOT / "private-input/inventory/hormozi-evidence-build-report-v4.json"
 DEFAULT_SKILLS_REPORT = ROOT / "private-input/inventory/hormozi-skills-build-report-v2.json"
 DEFAULT_OCR_RESULTS = ROOT / "private-input/ocr-results"
+DEFAULT_RESTRICTED_RESOLUTION = ROOT / "private-input/restricted-processing/restricted-source-resolution.json"
 VIDEO_HEADER = re.compile(r"^(.+?)\s+-\s+YouTube\s*$", re.I)
 VIDEO_URL = re.compile(r"https?://(?:www\.)?youtube\.com/watch\?v=[^\s]+", re.I)
 TIMESTAMP = re.compile(r"^\((\d{1,2}):(\d{2})(?::(\d{2}))?\)\s*(.*)$")
@@ -657,6 +658,150 @@ def integrate_ocr(output: Path, ocr_root: Path, ledger: list[dict[str, object]])
     return result
 
 
+RESTRICTED_SOURCE_IDS = {"qsrc-6c6e3045f49e5555", "qsrc-01130c01e9dc5522"}
+
+
+def integrate_restricted(
+    output: Path,
+    manifest: dict[str, object],
+    ledger: list[dict[str, object]],
+    resolution_path: Path = DEFAULT_RESTRICTED_RESOLUTION,
+) -> dict[str, object]:
+    """Consume an authorized restricted-resolution report, fail-closed.
+
+    The normal rebuild never opens quarantined files.  Only a resolution report
+    emitted by ``process_restricted.py`` with ``authorized_processed`` permits
+    this handoff.  Every reported hash is recomputed before any OCR atom is
+    copied into the private pack, and duplicate groups must cover exactly the
+    two quarantined inventory IDs.
+    """
+
+    result: dict[str, object] = {
+        "status": "pending_external_authorization",
+        "resolution_report": str(resolution_path),
+        "unique_work_count": 0,
+        "ocr_requested": False,
+        "ocr_atoms": 0,
+        "duplicate_groups": [],
+    }
+    if not resolution_path.is_file():
+        return result
+    try:
+        resolution = json.loads(resolution_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        result.update(status="invalid_resolution_report", error=type(error).__name__)
+        return result
+    if not isinstance(resolution, dict) or resolution.get("status") != "authorized_processed":
+        result.update(status=str(resolution.get("status", "invalid_resolution_report")) if isinstance(resolution, dict) else "invalid_resolution_report")
+        return result
+
+    manifest_rows = {
+        str(row.get("source_id")): row
+        for row in manifest.get("quarantined_sources", [])
+        if isinstance(row, dict)
+    }
+    reported_rows = {
+        str(row.get("source_id")): row
+        for row in resolution.get("sources", [])
+        if isinstance(row, dict)
+    }
+    if set(manifest_rows) != RESTRICTED_SOURCE_IDS or set(reported_rows) != RESTRICTED_SOURCE_IDS:
+        result.update(status="invalid_resolution_report", error="resolution must cover both restricted source IDs")
+        return result
+
+    # Hash verification is the authorization boundary for the source bytes.
+    for source_id in sorted(RESTRICTED_SOURCE_IDS):
+        reported = reported_rows[source_id]
+        source_path = Path(str(reported.get("path", "")))
+        expected_hash = str(reported.get("sha256", ""))
+        if not source_path.is_file() or not expected_hash.startswith("sha256:"):
+            result.update(status="invalid_resolution_report", error=f"missing path or hash for {source_id}")
+            return result
+        if sha256_file(source_path) != expected_hash:
+            result.update(status="source_hash_changed", error=f"hash mismatch for {source_id}")
+            return result
+
+    groups = resolution.get("duplicate_groups")
+    if not isinstance(groups, list) or not groups:
+        result.update(status="invalid_resolution_report", error="duplicate_groups is required")
+        return result
+    group_ids: list[str] = []
+    for group in groups:
+        if not isinstance(group, dict):
+            result.update(status="invalid_resolution_report", error="duplicate group must be an object")
+            return result
+        source_ids = [str(item) for item in group.get("source_ids", [])]
+        representative = str(group.get("representative_source_id", ""))
+        if not source_ids or representative not in source_ids:
+            result.update(status="invalid_resolution_report", error="duplicate group representative is invalid")
+            return result
+        group_ids.extend(source_ids)
+    if sorted(group_ids) != sorted(RESTRICTED_SOURCE_IDS):
+        result.update(status="invalid_resolution_report", error="duplicate groups must cover each restricted source exactly once")
+        return result
+
+    by_id = {str(row.get("record_id")): row for row in ledger if row.get("kind") == "inventory_record"}
+    if not RESTRICTED_SOURCE_IDS <= set(by_id):
+        result.update(status="invalid_resolution_report", error="canonical ledger is missing restricted records")
+        return result
+    ocr_rows = [row for row in resolution.get("ocr", []) if isinstance(row, dict)]
+    ocr_by_source = {str(row.get("source_id")): row for row in ocr_rows}
+    result["ocr_requested"] = bool(resolution.get("ocr_requested"))
+    result["unique_work_count"] = len(groups)
+    result["duplicate_groups"] = groups
+    result["authorized_sources"] = [
+        {
+            "source_id": source_id,
+            "sha256": reported_rows[source_id].get("sha256"),
+            "relative_path": manifest_rows[source_id].get("relative_path"),
+        }
+        for source_id in sorted(RESTRICTED_SOURCE_IDS)
+    ]
+
+    # Mark only the representative work as indexed; exact copies remain
+    # visible as duplicates and cannot overweight retrieval.
+    for group in groups:
+        representative = str(group["representative_source_id"])
+        for source_id in group["source_ids"]:
+            record = by_id[str(source_id)]
+            if str(source_id) == representative:
+                record["status"] = "indexed_restricted_ocr" if str(source_id) in ocr_by_source else "indexed_restricted_source"
+                record["rights_status"] = "authorized_internal_processing"
+                record["use_scope"] = "authorized_internal_retrieval"
+                record["pack_membership"] = sorted(set(record.get("pack_membership", [])) | {"restricted"})
+                record["authorization_report"] = str(resolution_path)
+            else:
+                record["status"] = "duplicate_by_sha256"
+                record["duplicate_of"] = representative
+
+    ocr_target = output / "ocr"
+    for source_id, ocr_row in ocr_by_source.items():
+        report_path = Path(str(ocr_row.get("report", "")))
+        atoms_dir = report_path.parent / "atoms"
+        if not atoms_dir.is_dir():
+            continue
+        for atom in sorted(atoms_dir.glob("*.md")):
+            destination = ocr_target / f"restricted-{source_id}-{atom.name}"
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(atom, destination)
+            text = atom.read_text(encoding="utf-8", errors="replace")
+            page_match = re.search(r"^source_page:\s*(\d+)", text, re.M)
+            page = int(page_match.group(1)) if page_match else None
+            ledger.append({
+                "record_id": f"restricted-ocr-{source_id}-page-{page:04d}" if page is not None else f"restricted-ocr-{source_id}-{atom.stem}",
+                "kind": "derived_restricted_ocr_page",
+                "title": atom.stem,
+                "status": "included_restricted_ocr",
+                "source_id": source_id,
+                "source_page": page,
+                "source_file": str(destination),
+                "pack_membership": "restricted",
+            })
+            result["ocr_atoms"] = int(result["ocr_atoms"]) + 1
+    result["status"] = "authorized_processed" if result["ocr_atoms"] or not result["ocr_requested"] else "authorized_pending_ocr"
+    return result
+
+
 def copy_skills(output: Path) -> dict[str, object]:
     source = find_paperclip()
     result: dict[str, object] = {"status": "missing", "packages": [], "invalid": []}
@@ -864,7 +1009,14 @@ def write_pack(output: Path, ledger: list[dict[str, object]], transcript_report:
     official_line = "verified catalog present" if official_status else "pending explicit yt-dlp acquisition"
     ocr_status = extras.get("ocr", {})
     ocr_line = f"{ocr_status.get('recovered_pages', 0)}/{ocr_status.get('requested_pages', 0)} pages recovered; visual QA remains explicit"
-    (output / "STATUS.md").write_text("# Brain status\n\n- Inventory records: " + str(inventory_count) + "\n- Structured YouTube videos: " + str(transcript_report["unique_videos"]) + "\n- Official-channel catalog videos: " + str(transcript_report.get("official_channel_video_count", "unknown")) + "\n- Official-channel caption records: " + str(transcript_report.get("official_caption_videos", 0)) + "\n- OCR: " + ocr_line + "\n- Executable skill packages: " + str(len(skill_report.get("packages", []))) + "\n- Restricted playbooks: quarantined pending authorization\n- OpenAI embedding index: pending `OPENAI_API_KEY`\n- Official-channel expansion: " + official_line + "\n", encoding="utf-8", newline="\n")
+    restricted_status = str(extras.get("restricted", {}).get("status", "pending_external_authorization"))
+    if restricted_status == "authorized_processed":
+        restricted_line = "authorized, deduplicated, and ingested"
+    elif restricted_status == "authorized_pending_ocr":
+        restricted_line = "authorized and deduplicated; OCR pending"
+    else:
+        restricted_line = "quarantined pending authorization"
+    (output / "STATUS.md").write_text("# Brain status\n\n- Inventory records: " + str(inventory_count) + "\n- Structured YouTube videos: " + str(transcript_report["unique_videos"]) + "\n- Official-channel catalog videos: " + str(transcript_report.get("official_channel_video_count", "unknown")) + "\n- Official-channel caption records: " + str(transcript_report.get("official_caption_videos", 0)) + "\n- OCR: " + ocr_line + "\n- Executable skill packages: " + str(len(skill_report.get("packages", []))) + "\n- Restricted playbooks: " + restricted_line + "\n- OpenAI embedding index: pending `OPENAI_API_KEY`\n- Official-channel expansion: " + official_line + "\n", encoding="utf-8", newline="\n")
 
 
 def main() -> int:
@@ -906,7 +1058,13 @@ def main() -> int:
     transcript_report = build_transcripts(output, ledger)
     merge_preserved_official(output, preserved, ledger, transcript_report)
     skill_report = copy_skills(output)
-    extras: dict[str, object] = {"ebook": [], "audio": [], "containers": container_report, "ocr": integrate_ocr(output, args.ocr_results, ledger)}
+    extras: dict[str, object] = {
+        "ebook": [],
+        "audio": [],
+        "containers": container_report,
+        "ocr": integrate_ocr(output, args.ocr_results, ledger),
+        "restricted": integrate_restricted(output, manifest, ledger),
+    }
     seen_hashes: set[str] = set()
     for source in manifest.get("sources", []):
         path = Path(str(source.get("path", "")))

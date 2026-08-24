@@ -80,3 +80,67 @@ def test_coverage_categories_are_explicit_and_do_not_hide_pending_sources(tmp_pa
     assert len(report["missing"]["official_captionless_videos"]) == 1
     assert len(report["missing"]["audio_pending_transcription"]) == 1
     assert report["missing"]["inventory_records"][0]["record_id"] == "missing"
+
+
+def test_restricted_handoff_is_fail_closed_without_resolution_report(tmp_path):
+    manifest = {
+        "quarantined_sources": [
+            {"source_id": source_id, "relative_path": f"{source_id}.pdf", "path": str(tmp_path / f"{source_id}.pdf")}
+            for source_id in BUILD.RESTRICTED_SOURCE_IDS
+        ]
+    }
+    ledger = [
+        {"kind": "inventory_record", "record_id": source_id, "status": "quarantined_restricted_authorization_required"}
+        for source_id in BUILD.RESTRICTED_SOURCE_IDS
+    ]
+    result = BUILD.integrate_restricted(tmp_path / "pack", manifest, ledger, tmp_path / "missing-resolution.json")
+    assert result["status"] == "pending_external_authorization"
+    assert all(row["status"] == "quarantined_restricted_authorization_required" for row in ledger)
+
+
+def test_authorized_restricted_handoff_hashes_deduplicates_and_ingests_ocr(tmp_path):
+    first = tmp_path / "first.pdf"
+    second = tmp_path / "second.pdf"
+    first.write_bytes(b"authorized pricing playbook")
+    second.write_bytes(first.read_bytes())
+    source_ids = sorted(BUILD.RESTRICTED_SOURCE_IDS)
+    manifest = {
+        "quarantined_sources": [
+            {"source_id": source_ids[0], "relative_path": "first.pdf", "path": str(first)},
+            {"source_id": source_ids[1], "relative_path": "second.pdf", "path": str(second)},
+        ]
+    }
+    report_dir = tmp_path / "restricted" / source_ids[0]
+    atoms_dir = report_dir / "atoms"
+    atoms_dir.mkdir(parents=True)
+    (atoms_dir / "page-0001.md").write_text(
+        "---\nsource_id: " + source_ids[0] + "\nsource_page: 1\n---\n# Pricing\n", encoding="utf-8"
+    )
+    report_path = report_dir / "ocr-report.json"
+    report_path.write_text("{}", encoding="utf-8")
+    resolution = {
+        "status": "authorized_processed",
+        "sources": [
+            {"source_id": source_ids[0], "path": str(first), "sha256": BUILD.sha256_file(first)},
+            {"source_id": source_ids[1], "path": str(second), "sha256": BUILD.sha256_file(second)},
+        ],
+        "duplicate_groups": [{"sha256": BUILD.sha256_file(first), "source_ids": source_ids, "representative_source_id": source_ids[0], "duplicate": True}],
+        "unique_work_count": 1,
+        "ocr_requested": True,
+        "ocr": [{"source_id": source_ids[0], "report": str(report_path)}],
+    }
+    resolution_path = tmp_path / "restricted-source-resolution.json"
+    resolution_path.write_text(json.dumps(resolution), encoding="utf-8")
+    ledger = [
+        {"kind": "inventory_record", "record_id": source_ids[0], "status": "quarantined_restricted_authorization_required", "pack_membership": []},
+        {"kind": "inventory_record", "record_id": source_ids[1], "status": "quarantined_restricted_authorization_required", "pack_membership": []},
+    ]
+    result = BUILD.integrate_restricted(tmp_path / "pack", manifest, ledger, resolution_path)
+    assert result["status"] == "authorized_processed"
+    assert result["unique_work_count"] == 1
+    assert result["ocr_atoms"] == 1
+    records = {row["record_id"]: row for row in ledger if row["kind"] == "inventory_record"}
+    assert records[source_ids[0]]["status"] == "indexed_restricted_ocr"
+    assert records[source_ids[1]]["status"] == "duplicate_by_sha256"
+    assert records[source_ids[1]]["duplicate_of"] == source_ids[0]
+    assert (tmp_path / "pack" / "ocr" / f"restricted-{source_ids[0]}-page-0001.md").is_file()
