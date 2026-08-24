@@ -5,6 +5,11 @@ quarantined. They must not be opened, hashed, OCRed, summarized, embedded, or
 served until the company owner records authorization here or in an equivalent
 internal ticket.
 
+The currently quarantined source IDs are:
+
+- `qsrc-6c6e3045f49e5555`
+- `qsrc-01130c01e9dc5522`
+
 For each copy, record:
 
 - inventory `source_id`;
