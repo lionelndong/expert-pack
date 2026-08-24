@@ -143,6 +143,7 @@ def transcribe_video(entry: dict, output_pack: Path, model: str, chunk_seconds: 
         "audio_retained": False,
         "timestamped_segments": len(merged_segments),
     }
+    return result
 
 
 def update_catalog(catalog_path: Path, video_id: str, result: dict) -> None:

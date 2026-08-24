@@ -2,6 +2,7 @@ import importlib.util
 import json
 from pathlib import Path
 import sys
+import types
 
 import pytest
 
@@ -88,3 +89,51 @@ def test_metadata_cache_estimate_does_not_download_media():
     assert estimate["metadata_status"] == "available"
     assert estimate["media_downloaded"] is False
     assert estimate["api_called"] is False
+
+
+def test_transcribe_video_returns_catalog_update_after_success(tmp_path, monkeypatch):
+    class FakeYDL:
+        def __init__(self, options):
+            self.options = options
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def extract_info(self, _url, download=False):
+            assert download is False
+            return {"title": "Example", "channel_url": "https://youtube.com/@AlexHormozi"}
+
+        def download(self, _urls):
+            output_template = str(self.options["outtmpl"])
+            Path(output_template.replace("%(id)s", "ABCDEFGHIJK").replace("%(ext)s", "m4a")).write_bytes(b"temporary audio")
+
+    class FakeOpenAI:
+        pass
+
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setattr(OFFICIAL, "YoutubeDL", FakeYDL)
+    monkeypatch.setattr(OFFICIAL.shutil, "which", lambda _command: "fake-tool")
+    monkeypatch.setattr(OFFICIAL, "duration_seconds", lambda _path: 61.0)
+    monkeypatch.setattr(OFFICIAL, "transcribe_chunk", lambda *_args, **_kwargs: {
+        "text": "Offer more value.",
+        "segments": [{"start": 0.0, "end": 1.5, "text": "Offer more value."}],
+    })
+    monkeypatch.setitem(sys.modules, "openai", types.SimpleNamespace(OpenAI=lambda: FakeOpenAI()))
+
+    def fake_run(*_args, **_kwargs):
+        return types.SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr("subprocess.run", fake_run)
+    result = OFFICIAL.transcribe_video(
+        {"video_id": "ABCDEFGHIJK", "url": "https://youtu.be/ABCDEFGHIJK", "title": "Fallback"},
+        tmp_path,
+        "test-model",
+        600,
+        1,
+    )
+    assert result["status"] == "openai_transcribed"
+    assert result["audio_retained"] is False
+    assert Path(result["transcript_path"]).is_file()
