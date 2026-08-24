@@ -69,6 +69,36 @@ CASES = [
 ]
 
 
+# Decision-support cases deliberately span multiple surfaces. They verify that
+# a recommendation has more than one relevant evidence path available, that
+# returned atoms carry stable locators, and that the agent contract contains
+# the required evidence/inference/conflict boundary language. They do not claim
+# that an LLM has produced a correct answer; that remains a separate live-agent
+# evaluation gate.
+DECISION_SCENARIOS = [
+    ("offers-pricing", "offer price value guarantee", ["offer", "price", "guarantee"]),
+    ("offers-delivery", "offer delivery results retention", ["offer", "delivery", "results"]),
+    ("leads-outreach", "leads cold warm outreach", ["leads", "outreach"]),
+    ("leads-advertising", "lead advertising core four", ["lead", "advertising", "core four"]),
+    ("marketing-hooks", "marketing hooks retain reward", ["marketing", "hook", "reward"]),
+    ("marketing-content", "content give ask what who when", ["content", "give", "ask"]),
+    ("pricing-premium", "premium pricing perceived value", ["premium", "pricing", "value"]),
+    ("pricing-scarcity", "pricing scarcity urgency guarantee", ["pricing", "scarcity", "guarantee"]),
+    ("sales-objections", "sales objection handling close", ["sales", "objection", "close"]),
+    ("sales-proof", "sales proof checklist price", ["sales", "proof", "price"]),
+    ("retention-churn", "retention churn lifetime value", ["retention", "churn", "lifetime"]),
+    ("retention-fulfillment", "fulfillment results customer success", ["fulfillment", "results", "customer"]),
+    ("scaling-systems", "scaling systems process constraint", ["scaling", "systems", "process"]),
+    ("scaling-hiring", "scaling employees lead getters", ["scaling", "employees", "lead"]),
+    ("scaling-agencies", "scaling agencies learn", ["scaling", "agencies", "learn"]),
+    ("money-model-upsell", "money model upsell profit", ["money", "upsell", "profit"]),
+    ("money-model-continuity", "money model continuity recurring", ["money", "continuity", "recurring"]),
+    ("books-offers", "books 100M offers grand slam", ["100m", "offers", "grand slam"]),
+    ("books-leads", "books 100M leads core four", ["100m", "leads", "core four"]),
+    ("cross-surface-tradeoff", "pricing retention delivery customer", ["pricing", "retention", "customer"]),
+]
+
+
 def load_atoms(pack: Path) -> list[tuple[Path, str]]:
     atoms = []
     for path in pack.rglob("*.md"):
@@ -80,6 +110,60 @@ def load_atoms(pack: Path) -> list[tuple[Path, str]]:
             continue
         atoms.append((path, content))
     return atoms
+
+
+def decision_scenario_report(pack: Path, atoms: list[tuple[Path, str]]) -> dict:
+    contract_path = Path(__file__).resolve().parents[2] / "guides" / "agent-decision-support-contract.md"
+    try:
+        contract = contract_path.read_text(encoding="utf-8", errors="replace").casefold()
+    except OSError:
+        contract = ""
+    contract_checks = {
+        "sourced_marker": "### sourced" in contract,
+        "inference_marker": "### inference" in contract and "this is the agent's" in contract and "analysis, not a statement" in contract,
+        "conflict_marker": "### conflict" in contract and "human owner" in contract,
+        "boundary_marker": "not an impersonation system" in contract and "not a statement by or on behalf" in contract,
+    }
+    indexed_atoms = [(path, content, content.casefold()) for path, content in atoms]
+    results = []
+    for scenario_id, query, expected in DECISION_SCENARIOS:
+        scored = []
+        for path, content, lowered in indexed_atoms:
+            score = sum(term.casefold() in lowered for term in expected)
+            if score:
+                scored.append((score, len(content), path, content))
+        scored.sort(key=lambda item: (-item[0], item[1], str(item[2])))
+        top = scored[:5]
+        source_paths = sorted({str(item[2].relative_to(pack)).replace("\\", "/") for item in top})
+        valid_locators = [
+            bool(re.search(r"^id:\s*.+", item[3], re.M))
+            and any(marker in item[3].casefold() for marker in ("provenance", "source lines", "youtube url", "pages", "chapter", "timestamp"))
+            for item in top
+        ]
+        direct_evidence = sum("evidence boundary" in item[3].casefold() or "provenance" in item[3].casefold() for item in top)
+        checks = {
+            "multiple_relevant_sources": len(source_paths) >= 2,
+            "valid_locators": bool(top) and all(valid_locators),
+            "direct_evidence_available": direct_evidence >= 2,
+            **contract_checks,
+        }
+        results.append({
+            "id": scenario_id,
+            "query": query,
+            "top5": source_paths,
+            "checks": checks,
+            "status": "pass" if all(checks.values()) else "fail",
+        })
+    passed = sum(row["status"] == "pass" for row in results)
+    return {
+        "cases": len(results),
+        "passed": passed,
+        "pass_rate": passed / len(results) if results else 0,
+        "status": "structural_retrieval_contract_only",
+        "live_agent_response_evaluation": "not_run",
+        "limitations": ["Does not generate or judge an LLM response.", "Semantic embedding retrieval remains pending the approved OpenAI API key."],
+        "results": results,
+    }
 
 
 def main() -> int:
@@ -110,6 +194,7 @@ def main() -> int:
         results.append({"id": f"retrieval-{index:03d}", "category": category, "query": query, "expected_terms": expected, "top5": [str(item[2].relative_to(pack)).replace("\\", "/") for item in top], "relevant_top5": bool(top), "valid_citations_top5": all(valid_top) if top else False})
     relevant = sum(bool(row["relevant_top5"]) for row in results)
     cited = sum(bool(row["valid_citations_top5"]) for row in results)
+    scenario_report = decision_scenario_report(pack, atoms)
     report = {
         "kind": "offline_lexical_and_provenance_smoke_test",
         "semantic_embedding_evaluation": "not_run",
@@ -119,7 +204,7 @@ def main() -> int:
         "valid_citation_top5_cases": cited,
         "valid_citation_top5_rate": cited / len(results) if results else 0,
         "locator_failures": sorted(set(locator_failures)),
-        "decision_scenarios": 20,
+        "decision_scenarios": scenario_report,
         "results": results,
     }
     output = (args.output or pack / "meta" / "quality-report.json").resolve()
@@ -127,7 +212,7 @@ def main() -> int:
     report["output"] = str(output)
     output.write_text(json.dumps(report, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     print(json.dumps({key: report[key] for key in ("cases", "relevant_top5_rate", "valid_citation_top5_rate", "semantic_embedding_evaluation", "output")}, indent=2))
-    return 0 if relevant == len(results) and not locator_failures else 1
+    return 0 if relevant == len(results) and not locator_failures and scenario_report["passed"] == scenario_report["cases"] else 1
 
 
 if __name__ == "__main__":

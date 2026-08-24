@@ -70,6 +70,10 @@ def main() -> int:
         "audio": check("pending_external_api" if any(row.get("status") == "metadata_ready_pending_transcription" for row in coverage.get("extras", {}).get("audio", [])) else "pass", "Timestamped audio transcription requires OPENAI_API_KEY"),
         "embeddings": check("pending_external_api" if not os.environ.get("OPENAI_API_KEY") else "ready_to_run", f"{estimate.get('estimated_input_tokens')} estimated tokens; projected=${estimate.get('projected_embedding_cost_usd')}; local_model={estimate.get('local_model')}"),
         "offline_retrieval": check("pass" if quality.get("relevant_top5_rate") == 1.0 and quality.get("valid_citation_top5_rate") == 1.0 else "pending" if not quality else "fail", f"{quality.get('cases')} cases; top5 relevance={quality.get('relevant_top5_rate')}; locator validity={quality.get('valid_citation_top5_rate')}"),
+        "decision_scenarios": check(
+            "pass" if quality.get("decision_scenarios", {}).get("cases") == 20 and quality.get("decision_scenarios", {}).get("passed") == 20 else "pending" if not quality else "fail",
+            f"{quality.get('decision_scenarios', {}).get('passed', 0)}/{quality.get('decision_scenarios', {}).get('cases', 0)} structural scenarios; live_agent_response_evaluation={quality.get('decision_scenarios', {}).get('live_agent_response_evaluation', 'missing')}",
+        ),
         "semantic_retrieval": check("pending_external_api" if quality.get("semantic_embedding_evaluation") == "not_run" else "pass", "Requires a completed OpenAI vector index and semantic benchmark"),
         "company_deployment": check(
             "pass" if readiness.get("overall_status") == "ready_for_gateway" else "staged" if readiness else "pending",
