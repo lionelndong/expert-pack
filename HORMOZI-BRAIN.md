@@ -114,6 +114,14 @@ provider selection, and secret presence without printing secret values. A
 `ready_for_gateway` result still requires the company gateway to supply TLS,
 identity/access policy, distributed rate limiting, and its audit sink.
 
+After those external controls are confirmed, start the network-bound service
+through the fail-closed wrapper. It requires both secret-manager variables and
+explicit operator acknowledgement of the approved OpenAI data flow and gateway:
+
+```powershell
+.\scripts\start-hormozi-company.ps1 -GatewayReady -AllowRemoteEmbedding
+```
+
 ## Rebuild an approved private pack
 
 Use the inventory and rights decision tools before building. The builder only
