@@ -318,6 +318,15 @@ def audio_metadata(path: Path, output: Path, ledger: list[dict[str, object]]) ->
         completed = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration,size", "-of", "json", str(path)], check=True, capture_output=True, text=True)
         result["metadata"] = json.loads(completed.stdout).get("format", {})
         result["status"] = "metadata_ready_pending_transcription"
+        duration = float(result["metadata"].get("duration", 0) or 0)
+        chunk_seconds = 600
+        result["transcription_plan"] = {
+            "model": "gpt-4o-mini-transcribe",
+            "chunk_seconds": chunk_seconds,
+            "chunk_count": max(0, (int(duration + chunk_seconds - 1) // chunk_seconds)),
+            "timestamped_segments": True,
+            "requires_openai_api_key": True,
+        }
     except (OSError, subprocess.CalledProcessError, json.JSONDecodeError) as error:
         result["error"] = str(error)
     (target / f"{slug(path.stem)}.json").write_text(json.dumps(result, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")

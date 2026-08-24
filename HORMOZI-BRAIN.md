@@ -32,6 +32,8 @@ committed to this repository.
   adapters for remaining OCR/audio gaps.
 - `guides/agent-decision-support-contract.md` — required evidence-first rules
   for agents that consume the packs.
+- `guides/hormozi-restricted-source-authorization.md` — authorization record
+  required before either restricted pricing-playbook copy can be processed.
 
 ## Verify the framework
 
