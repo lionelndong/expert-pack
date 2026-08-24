@@ -64,7 +64,12 @@ def main() -> int:
             f"{len(official_estimate.get('videos', []))} captionless videos; chunks={official_estimate.get('total_estimated_chunks')}; api_called={official_estimate.get('api_called')}; media_downloaded={official_estimate.get('media_downloaded')}",
         ),
         "paperclip_skills": check("pass" if len(packages) == 24 and not missing_skills and not coverage.get("skills", {}).get("invalid") and skill_validation.get("overall_status") == "pass" else "fail", f"{len(packages)} packages; structural={not missing_skills}; workflow_validation={skill_validation.get('overall_status', 'missing')}"),
-        "ocr_pages": check("pass" if ocr.get("requested_pages") == 442 and ocr.get("recovered_pages") == 442 else "pending", f"{ocr.get('recovered_pages', 0)}/{ocr.get('requested_pages', 0)} pages recovered; visual QA={ocr.get('visual_qa_status')}"),
+        "ocr_pages": check(
+            "pass" if ocr.get("requested_pages") == 442 and ocr.get("recovered_pages") == 442 and ocr.get("visual_qa_status") in {"complete", "manual_review_complete"}
+            else "pending_manual_visual_qa" if ocr.get("requested_pages") == 442 and ocr.get("recovered_pages") == 442
+            else "pending",
+            f"{ocr.get('recovered_pages', 0)}/{ocr.get('requested_pages', 0)} pages recovered; visual QA={ocr.get('visual_qa_status')}",
+        ),
         "container_formats": check(
             "pass" if containers.get("source_count") == 3 and not containers.get("unique_knowledge_ingested") and all(
                 row.get("status") in {"inspected_metadata_manifest_no_unique_knowledge", "inspected_container_manifest_no_unique_knowledge"}
