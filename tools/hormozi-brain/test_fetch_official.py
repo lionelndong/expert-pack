@@ -101,3 +101,59 @@ def test_caption_segments_preserve_vtt_xml_and_json_timestamps():
     assert FETCH.parse_caption_segments(ttml) == [(4.25, "Price it right.")]
     assert FETCH.parse_caption_segments(json3) == [(6.5, "Close.")]
     assert FETCH.format_caption_segments(FETCH.parse_caption_segments(vtt)) == "(0:01) Add value."
+
+
+def test_empty_caption_track_remains_explicitly_pending(tmp_path, monkeypatch):
+    class FakeYDL:
+        def __init__(self, _options):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def extract_info(self, _url, download=False):
+            assert download is False
+            return {"subtitles": {"en": [{"url": "caption", "ext": "vtt"}]}}
+
+    monkeypatch.setattr(FETCH, "YoutubeDL", FakeYDL)
+    monkeypatch.setattr(FETCH, "fetch_caption", lambda _url: "")
+    video_id, row = FETCH.fetch_missing_caption(
+        {"video_id": "ABCDEFGHIJK", "title": "Example", "url": "https://youtu.be/ABCDEFGHIJK"},
+        "https://www.youtube.com/@AlexHormozi/videos",
+        tmp_path,
+        {},
+    )
+    assert video_id == "ABCDEFGHIJK"
+    assert row["status"] == "caption_unavailable_pending_openai_transcription"
+    assert row["caption_resolution"] == "caption_empty"
+
+
+def test_caption_fetch_error_remains_explicitly_pending(tmp_path, monkeypatch):
+    class FakeYDL:
+        def __init__(self, _options):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def extract_info(self, _url, download=False):
+            assert download is False
+            return {"subtitles": {"en": [{"url": "caption", "ext": "vtt"}]}}
+
+    monkeypatch.setattr(FETCH, "YoutubeDL", FakeYDL)
+    monkeypatch.setattr(FETCH, "fetch_caption", lambda _url: (_ for _ in ()).throw(RuntimeError("network")))
+    _video_id, row = FETCH.fetch_missing_caption(
+        {"video_id": "ABCDEFGHIJK", "title": "Example", "url": "https://youtu.be/ABCDEFGHIJK"},
+        "https://www.youtube.com/@AlexHormozi/videos",
+        tmp_path,
+        {},
+    )
+    assert row["status"] == "caption_unavailable_pending_openai_transcription"
+    assert row["caption_resolution"] == "caption_error"
+    assert row["caption_error"] == "RuntimeError"

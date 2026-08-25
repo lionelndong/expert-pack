@@ -262,8 +262,12 @@ def fetch_missing_caption(entry: dict, channel_url: str, youtube_dir: Path, opti
             return video_id, row
         text = fetch_caption(track[0])
         if not text:
-            row["status"] = "caption_empty"
+            # Keep the lifecycle status in the canonical unresolved bucket so
+            # downstream coverage and transcription estimates cannot silently
+            # treat an empty subtitle response as complete.
+            row["status"] = "caption_unavailable_pending_openai_transcription"
             row["caption_track_status"] = "track_returned_empty"
+            row["caption_resolution"] = "caption_empty"
             row["caption_checked_at"] = datetime.now(timezone.utc).isoformat()
             return video_id, row
         section = {
@@ -289,7 +293,9 @@ def fetch_missing_caption(entry: dict, channel_url: str, youtube_dir: Path, opti
         row["caption_track_status"] = f"{track[2]}_{track[1]}_ingested"
         row["caption_checked_at"] = datetime.now(timezone.utc).isoformat()
     except Exception as error:  # Network/caption failures remain visible in the catalog.  # noqa: BLE001
-        row["status"] = "caption_error"
+        row["status"] = "caption_unavailable_pending_openai_transcription"
+        row["caption_track_status"] = "caption_fetch_error"
+        row["caption_resolution"] = "caption_error"
         row["caption_error"] = type(error).__name__
     return video_id, row
 
