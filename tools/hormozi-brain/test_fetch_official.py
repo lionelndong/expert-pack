@@ -59,6 +59,7 @@ def test_refresh_report_records_metadata_only_provenance(tmp_path, monkeypatch):
     assert report["captions_requested"] is False
     assert report["verified_channel_urls"] == ["https://www.youtube.com/@AlexHormozi/videos"]
     assert report["channels"][0]["channel"] == "Alex Hormozi"
+    assert report["channels"][0]["videos"][0]["status"] == "caption_unavailable_pending_openai_transcription"
 
 
 def test_caption_selection_checks_automatic_english_tracks():

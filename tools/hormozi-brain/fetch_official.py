@@ -333,6 +333,11 @@ def main() -> int:
                 video_id = str(entry.get("id") or "")
                 if not video_id:
                     continue
+                # A metadata-only refresh must never make an untranscribed
+                # video look complete.  The catalog is an acceptance ledger,
+                # so every video without a local caption/transcript remains an
+                # explicit pending transcription record until captions or an
+                # approved OpenAI transcript are actually ingested.
                 row = {
                     "video_id": video_id,
                     "title": entry.get("title"),
@@ -340,7 +345,7 @@ def main() -> int:
                     "channel": channel_record.get("channel"),
                     "channel_id": channel_record.get("channel_id"),
                     "channel_url": channel_url,
-                    "status": "already_present" if video_id in existing_ids else "metadata_only",
+                    "status": "already_present" if video_id in existing_ids else "caption_unavailable_pending_openai_transcription",
                 }
                 if args.fetch_captions and video_id not in existing_ids:
                     pending.append(row)
