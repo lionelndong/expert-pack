@@ -73,3 +73,10 @@ def test_authorization_rejects_unknown_source_id():
     errors = RESTRICTED.validate_authorization(record)
     assert any("unknown sources" in error for error in errors)
     assert any(f"missing authorization for {IDS[0]}" in error for error in errors)
+
+
+def test_authorization_rejects_unfilled_template_placeholders():
+    record = authorization_record()
+    record["sources"][0]["rights_owner"] = "REPLACE_WITH_NAMED_RIGHTS_OWNER"
+    errors = RESTRICTED.validate_authorization(record)
+    assert any("template placeholders" in error for error in errors)

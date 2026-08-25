@@ -61,6 +61,13 @@ def validate_authorization(record: dict) -> list[str]:
         missing = sorted(field for field in REQUIRED_AUTH_FIELDS if not str(item.get(field, "")).strip())
         if missing:
             errors.append(f"{source_id} missing fields: {', '.join(missing)}")
+        placeholders = sorted(
+            field
+            for field in REQUIRED_AUTH_FIELDS
+            if "REPLACE_WITH_" in str(item.get(field, ""))
+        )
+        if placeholders:
+            errors.append(f"{source_id} still contains template placeholders: {', '.join(placeholders)}")
     return errors
 
 

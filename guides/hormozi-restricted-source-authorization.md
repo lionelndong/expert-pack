@@ -12,6 +12,11 @@ The currently quarantined source IDs are:
 
 The machine-readable record must conform to
 [`config/source-intake/restricted-authorization.schema.json`](../config/source-intake/restricted-authorization.schema.json).
+Start from the tracked
+[`config/source-intake/restricted-authorization.template.json`](../config/source-intake/restricted-authorization.template.json),
+replace every placeholder, and save the completed record only under the
+ignored `private-input/restricted-processing/authorization.json` path (or an
+approved internal ticket location). Do not commit the completed record.
 
 For each copy, record:
 

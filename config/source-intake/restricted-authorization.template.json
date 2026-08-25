@@ -1,0 +1,27 @@
+{
+  "$schema": "restricted-authorization.schema.json",
+  "authorization_status": "authorized",
+  "permitted_internal_processing": true,
+  "sources": [
+    {
+      "source_id": "qsrc-01130c01e9dc5522",
+      "rights_owner": "REPLACE_WITH_NAMED_RIGHTS_OWNER",
+      "department": "REPLACE_WITH_COMPANY_DEPARTMENT",
+      "obtained_via": "REPLACE_WITH_LAWFUL_SOURCE_OR_INTERNAL_TRANSFER_RECORD",
+      "scope": "REPLACE_WITH_EXPLICIT_INTERNAL_PROCESSING_RETENTION_AND_AGENT_RETRIEVAL_SCOPE",
+      "approver": "REPLACE_WITH_APPROVER_IDENTITY",
+      "approved_at": "REPLACE_WITH_ISO8601_APPROVAL_TIMESTAMP",
+      "ticket": "REPLACE_WITH_INTERNAL_TICKET_OR_REFERENCE"
+    },
+    {
+      "source_id": "qsrc-6c6e3045f49e5555",
+      "rights_owner": "REPLACE_WITH_NAMED_RIGHTS_OWNER",
+      "department": "REPLACE_WITH_COMPANY_DEPARTMENT",
+      "obtained_via": "REPLACE_WITH_LAWFUL_SOURCE_OR_INTERNAL_TRANSFER_RECORD",
+      "scope": "REPLACE_WITH_EXPLICIT_INTERNAL_PROCESSING_RETENTION_AND_AGENT_RETRIEVAL_SCOPE",
+      "approver": "REPLACE_WITH_APPROVER_IDENTITY",
+      "approved_at": "REPLACE_WITH_ISO8601_APPROVAL_TIMESTAMP",
+      "ticket": "REPLACE_WITH_INTERNAL_TICKET_OR_REFERENCE"
+    }
+  ]
+}
