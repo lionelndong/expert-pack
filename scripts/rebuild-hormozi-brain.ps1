@@ -28,6 +28,22 @@ function Invoke-PythonStep {
     }
 }
 
+function Get-OfficialCaptionlessIds {
+    $catalogPath = Join-Path $repositoryRoot "private-input\packs\alex-hormozi-brain-v1\meta\official-channel-catalog.json"
+    if (-not (Test-Path -LiteralPath $catalogPath)) {
+        throw "Official-channel catalog not found: $catalogPath"
+    }
+    $catalog = Get-Content -LiteralPath $catalogPath -Raw | ConvertFrom-Json
+    @(
+        $catalog.channels |
+            ForEach-Object { $_.videos } |
+            Where-Object { $_.status -eq "caption_unavailable_pending_openai_transcription" } |
+            ForEach-Object { [string]$_.video_id } |
+            Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
+            Sort-Object -Unique
+    )
+}
+
 function Invoke-ValidationSteps {
     Invoke-PythonStep "strict ExpertPack validation" @(
         "-m", "expertpack", "validate",
@@ -43,6 +59,10 @@ function Invoke-ValidationSteps {
     } finally {
         Pop-Location
     }
+    Invoke-PythonStep "provider-free MCP contract smoke" @(
+        "tools/hormozi-brain/mcp_contract_smoke.py",
+        "--pack", "private-input/packs/alex-hormozi-brain-v1"
+    )
     Invoke-PythonStep "OCR review packet" @(
         "tools/hormozi-brain/make_ocr_review_packet.py",
         "--root", "private-input/ocr-results",
@@ -52,28 +72,22 @@ function Invoke-ValidationSteps {
     Invoke-PythonStep "skill validation" @("tools/hormozi-brain/validate_skills.py")
     Invoke-PythonStep "embedding estimate" @("tools/hormozi-brain/estimate_embeddings.py", "--pack", "private-input/packs/alex-hormozi-brain-v1")
     Invoke-PythonStep "quality benchmark" @("tools/hormozi-brain/quality_check.py", "--pack", "private-input/packs/alex-hormozi-brain-v1")
-    Invoke-PythonStep "official transcription estimate" @(
-        "tools/hormozi-brain/transcribe_official.py",
-        "--video-id", "OVhNSzFSoZs",
-        "--video-id", "FXzDLLdxsCk",
-        "--video-id", "FKWEybUIda4",
-        "--video-id", "sSEm3qJUh9s",
-        "--video-id", "A4L3byKcYQg",
-        "--video-id", "Gh9zWsP8JpI",
+    $officialCaptionlessIds = @(Get-OfficialCaptionlessIds)
+    $officialEstimateArgs = @("tools/hormozi-brain/transcribe_official.py")
+    foreach ($videoId in $officialCaptionlessIds) {
+        $officialEstimateArgs += @("--video-id", $videoId)
+    }
+    $officialEstimateArgs += @(
         "--catalog", "private-input/packs/alex-hormozi-brain-v1/meta/official-channel-catalog.json",
         "--output", "private-input/packs/alex-hormozi-brain-v1",
         "--metadata-cache", "private-input/official-channel-metadata-cache.json",
         "--estimate-only"
     )
+    Invoke-PythonStep "official transcription estimate" $officialEstimateArgs
     Invoke-PythonStep "decision-support contract preflight" @("tools/hormozi-brain/evaluate_decision_support.py")
     Invoke-PythonStep "company readiness" @("tools/hormozi-brain/company_readiness.py")
     Invoke-PythonStep "acceptance audit" @("tools/hormozi-brain/acceptance_audit.py")
 }
-
-$officialCaptionlessIds = @(
-    "OVhNSzFSoZs", "FXzDLLdxsCk", "FKWEybUIda4",
-    "sSEm3qJUh9s", "A4L3byKcYQg", "Gh9zWsP8JpI"
-)
 
 Push-Location $repositoryRoot
 try {
@@ -128,6 +142,7 @@ try {
             "--pack", "private-input/packs/alex-hormozi-brain-v1"
         )
         $catalog = "private-input/packs/alex-hormozi-brain-v1/meta/official-channel-catalog.json"
+        $officialCaptionlessIds = @(Get-OfficialCaptionlessIds)
         $officialEstimateArgs = @(
             "tools/hormozi-brain/transcribe_official.py"
         )

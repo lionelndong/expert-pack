@@ -266,6 +266,15 @@ def main() -> int:
         video for video in catalog_videos
         if video.get("status") == "caption_unavailable_pending_openai_transcription"
     ]
+    expected_captionless_estimates = len(captionless_videos)
+    actual_captionless_estimates = official_estimate.get("videos", []) if isinstance(official_estimate, dict) else []
+    official_estimate_complete = bool(
+        official_estimate
+        and len(actual_captionless_estimates) == expected_captionless_estimates
+        and official_estimate.get("metadata_available") is True
+        and official_estimate.get("api_called") is False
+        and official_estimate.get("media_downloaded") is False
+    )
     embedding_index_path = ROOT / "runtime/ep-mcp-index/alex-hormozi-brain/index.db"
     embedding_index_ready = sqlite_embedding_index_ready(embedding_index_path)
     ocr = coverage.get("extras", {}).get("ocr", {})
@@ -313,8 +322,8 @@ def main() -> int:
             f"{len(captionless_videos)} official videos remain without a transcript",
         ),
         "official_transcription_estimate": check(
-            "pass" if official_estimate.get("videos") and len(official_estimate.get("videos", [])) == 6 and official_estimate.get("metadata_available") is True and official_estimate.get("api_called") is False and official_estimate.get("media_downloaded") is False else "pending_external_metadata" if official_estimate.get("videos") and official_estimate.get("metadata_available") is False else "pending" if not official_estimate else "fail",
-            f"{len(official_estimate.get('videos', []))} captionless videos; chunks={official_estimate.get('total_estimated_chunks')}; api_called={official_estimate.get('api_called')}; media_downloaded={official_estimate.get('media_downloaded')}",
+            "pass" if official_estimate_complete else "pending_external_metadata" if actual_captionless_estimates and official_estimate.get("metadata_available") is False else "pending" if not official_estimate or len(actual_captionless_estimates) != expected_captionless_estimates else "fail",
+            f"{len(actual_captionless_estimates)}/{expected_captionless_estimates} captionless videos estimated; chunks={official_estimate.get('total_estimated_chunks')}; api_called={official_estimate.get('api_called')}; media_downloaded={official_estimate.get('media_downloaded')}",
         ),
         "transcription_usage_estimates": check(
             "pass"

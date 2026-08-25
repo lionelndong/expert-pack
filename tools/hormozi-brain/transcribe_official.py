@@ -298,7 +298,12 @@ def unavailable_estimate(entry: dict, model: str, chunk_seconds: int, price_per_
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--video-id", action="append", required=True, help="Catalog video ID; repeat for multiple videos")
+    parser.add_argument(
+        "--video-id",
+        action="append",
+        default=[],
+        help="Catalog video ID; repeat for multiple videos (optional for an empty estimate)",
+    )
     parser.add_argument("--catalog", type=Path, default=Path("private-input/packs/alex-hormozi-brain-v1/meta/official-channel-catalog.json"))
     parser.add_argument("--output", type=Path, default=Path("private-input/packs/alex-hormozi-brain-v1"))
     parser.add_argument("--model", default="gpt-4o-mini-transcribe")
@@ -308,6 +313,8 @@ def main() -> int:
     parser.add_argument("--metadata-cache", type=Path, help="Optional read-only JSON cache of browser-verified video durations")
     parser.add_argument("--estimate-only", action="store_true", help="Use metadata only; do not download media or call OpenAI")
     args = parser.parse_args()
+    if not args.video_id and not args.estimate_only:
+        raise SystemExit("At least one --video-id is required for transcription")
     if not args.catalog.is_file():
         raise SystemExit(f"Official-channel catalog not found: {args.catalog}")
     catalog = json.loads(args.catalog.read_text(encoding="utf-8"))
@@ -349,6 +356,7 @@ def main() -> int:
             "report_version": "1.0",
             "model": args.model,
             "videos": estimates,
+            "status": "no_captionless_videos" if not estimates else "estimate_only",
             "metadata_available": metadata_available,
             "total_duration_seconds": sum(item["duration_seconds"] for item in estimates) if metadata_available else None,
             "total_estimated_chunks": sum(item["estimated_chunks"] for item in estimates) if metadata_available else None,

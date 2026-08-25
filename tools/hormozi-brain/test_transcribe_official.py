@@ -71,6 +71,23 @@ def test_metadata_estimate_does_not_download_media(monkeypatch):
     assert estimate["projected_transcription_cost_usd"] == round(125 / 60 * 0.01, 6)
 
 
+def test_empty_metadata_estimate_is_valid_when_no_captionless_videos(tmp_path, monkeypatch):
+    catalog = tmp_path / "catalog.json"
+    catalog.write_text(json.dumps({"channels": []}), encoding="utf-8")
+    monkeypatch.setattr(sys, "argv", [
+        "transcribe_official.py",
+        "--catalog", str(catalog),
+        "--output", str(tmp_path),
+        "--estimate-only",
+    ])
+    assert OFFICIAL.main() == 0
+    report = json.loads((tmp_path / "meta" / "official-transcription-estimate.json").read_text(encoding="utf-8"))
+    assert report["status"] == "no_captionless_videos"
+    assert report["videos"] == []
+    assert report["metadata_available"] is True
+    assert report["api_called"] is False
+
+
 def test_unavailable_estimate_is_explicit_and_fail_closed():
     estimate = OFFICIAL.unavailable_estimate(
         {"video_id": "ABCDEFGHIJK", "title": "Example", "url": "https://youtu.be/ABCDEFGHIJK"},
